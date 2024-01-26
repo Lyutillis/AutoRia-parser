@@ -1,0 +1,3 @@
+# START CRON JOB
+* * * * * cd autoria_parser/ && /usr/local/bin/scrapy crawl car_parser > /proc/1/fd/1 2>/proc/1/fd/2
+# END CRON JOB

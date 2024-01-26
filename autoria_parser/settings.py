@@ -62,9 +62,10 @@ ROBOTSTXT_OBEY = True
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-# ITEM_PIPELINES = {
+ITEM_PIPELINES = {
 #    "autoria_parser.pipelines.AutoriaParserPipeline": 300,
-# }
+   "autoria_parser.pipelines.AutoriaParserNoDuplicatesPipeline": 300
+}
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
