@@ -1,9 +1,9 @@
 # Auto Ria Parser
 This project utilizes Scrapy to get data on used cars from `auto.ria.com` and saves it into PostgreSQL database.
-The code responsible for parsing is in `autoria_parser/spider/car_parser.py`
-All database actions are handled in `autoria_parser/pipelines.py`
-In `autoria_parser/celery.py` Celery settings for scheduled tasks are stored
-In `autoria_parser/log.py` Logger settings are stored
+- The code responsible for parsing is in `autoria_parser/spider/car_parser.py`
+- All database actions are handled in `autoria_parser/pipelines.py`
+- In `autoria_parser/celery.py` Celery settings for scheduled tasks are stored
+- In `autoria_parser/log.py` Logger settings are stored
 
 # .env
 Overview:
