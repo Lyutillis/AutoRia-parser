@@ -12,7 +12,7 @@ def create_logger():
         catch=True,
         format="<light-cyan>{time:MM-DD-YYYY HH:mm:ss}</light-cyan> | "
         + "<light-green>{level}</light-green>: "
-        + "<light-white>{message}</light-white>"
+        + "<light-white>{message}</light-white>",
     )
     return logger
 

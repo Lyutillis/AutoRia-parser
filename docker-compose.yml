@@ -3,7 +3,6 @@ version: '3.1'
 services:
   db:
     image: postgres:14-alpine
-    restart: unless-stopped
     ports:
       - "5432:5432"
     env_file:
@@ -12,10 +11,42 @@ services:
   spiders:
     build: 
       context: .
-    restart: unless-stopped
+    command: >
+      sh -c "echo Scrapy running in background && tail -f /dev/null"
     volumes:
       - .:/app
     env_file:
       - .env
     depends_on:
-        - db 
+        - db
+
+  celery:
+    restart: always
+    build:
+      context: .
+    command: >
+      sh -c "celery -A autoria_parser.celery worker -l info"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - rabbitmq3
+  
+  beat:
+    build:
+        context: .
+    command: >
+      sh -c "celery -A autoria_parser.celery beat -l info --pidfile=/tmp/core.pid"
+    volumes:
+      - .:/app
+    depends_on:
+      - celery
+      - rabbitmq3
+
+  rabbitmq3:
+    container_name: "rabbitmq"
+    image: rabbitmq:3-management-alpine
+    ports:
+      - 5672:5672
+      - 15672:15672
