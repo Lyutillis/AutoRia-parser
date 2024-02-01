@@ -1,7 +1,7 @@
 from scrapy import cmdline
 from celery import shared_task
 
-from autoria_parser.pipelines import AutoriaParserPipeline
+from .pipelines import AutoriaParserPipeline
 
 
 @shared_task

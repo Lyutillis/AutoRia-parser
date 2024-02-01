@@ -9,7 +9,7 @@ load_dotenv()
 
 
 app = Celery(
-    "celery",
+    "celerycore",
     broker=os.environ["RABBIT_URL"],
 )
 app.conf.enable_utc = False

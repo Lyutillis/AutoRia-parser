@@ -9,14 +9,11 @@ from .items import AutoriaParserItem
 from .log import LOGGER
 
 
-load_dotenv()
-
-
 class AutoriaParserPipeline:
 
     def __init__(self) -> None:
-        self.hostname = "localhost"
-        self.username = os.environ["POSTGRES_USER"]
+        self.hostname = os.environ["POSTGRES_HOST"]
+        self.username = os.environ["PG_USER"]
         self.password = os.environ["POSTGRES_PASSWORD"]
         self.database = os.environ["POSTGRES_DB"]
         self.port = os.environ["POSTGRES_PORT"]
@@ -64,7 +61,7 @@ class AutoriaParserPipeline:
             )
             sys.exit(10)
 
-    def process_item(self, item: AutoriaParserItem) -> dict:
+    def process_item(self, item: AutoriaParserItem, spider: Spider) -> dict:
         self.cur.execute(
             """INSERT INTO cars (
             url,
@@ -98,14 +95,14 @@ class AutoriaParserPipeline:
         self.connection.commit()
         return item
 
-    def close_spider(self) -> None:
+    def close_spider(self, spider: Spider) -> None:
         self.cur.close()
         self.connection.close()
 
 
 class AutoriaParserNoDuplicatesPipeline(AutoriaParserPipeline):
 
-    def process_item(self, item: AutoriaParserItem) -> dict:
+    def process_item(self, item: AutoriaParserItem, spider: Spider) -> dict:
 
         self.cur.execute(
             "SELECT * FROM cars WHERE car_vin = %s", (item["car_vin"],)

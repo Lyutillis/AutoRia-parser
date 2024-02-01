@@ -2,7 +2,7 @@ version: '3.1'
 
 services:
   db:
-    image: postgres:14-alpine
+    image: postgres:11.22-alpine
     ports:
       - "5432:5432"
     env_file:
@@ -25,7 +25,7 @@ services:
     build:
       context: .
     command: >
-      sh -c "celery -A autoria_parser.celery worker -l info"
+      sh -c "celery -A autoria_parser.celerycore worker -l info"
     volumes:
       - .:/app
     env_file:
@@ -37,9 +37,11 @@ services:
     build:
         context: .
     command: >
-      sh -c "celery -A autoria_parser.celery beat -l info --pidfile=/tmp/core.pid"
+      sh -c "celery -A autoria_parser.celerycore beat -l info --pidfile=/tmp/core.pid"
     volumes:
       - .:/app
+    env_file:
+      - .env
     depends_on:
       - celery
       - rabbitmq3
@@ -47,6 +49,8 @@ services:
   rabbitmq3:
     container_name: "rabbitmq"
     image: rabbitmq:3-management-alpine
+    env_file:
+      - .env
     ports:
       - 5672:5672
       - 15672:15672
