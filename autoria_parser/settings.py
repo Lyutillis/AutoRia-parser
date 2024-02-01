@@ -6,7 +6,6 @@ NEWSPIDER_MODULE = "autoria_parser.spiders"
 ROBOTSTXT_OBEY = True
 
 ITEM_PIPELINES = {
-    #    "autoria_parser.pipelines.AutoriaParserPipeline": 300,
     "autoria_parser.pipelines.AutoriaParserNoDuplicatesPipeline": 300
 }
 

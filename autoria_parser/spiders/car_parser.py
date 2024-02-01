@@ -27,6 +27,8 @@ class CarParserSpider(scrapy.Spider):
                     car_vin = car_vin[0].strip()
                 elif car_vin[1]:
                     car_vin = car_vin[1].strip()
+                else:
+                    car_vin = None
 
                 url = response.urljoin(
                     car.css(".content-bar > a.m-link-ticket::attr(href)").get()
