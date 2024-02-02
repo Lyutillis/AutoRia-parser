@@ -13,7 +13,7 @@ class AutoriaParserPipeline:
 
     def __init__(self) -> None:
         self.hostname = os.environ["POSTGRES_HOST"]
-        self.username = os.environ["PG_USER"]
+        self.username = os.environ["POSTGRES_USER"]
         self.password = os.environ["POSTGRES_PASSWORD"]
         self.database = os.environ["POSTGRES_DB"]
         self.port = os.environ["POSTGRES_PORT"]
