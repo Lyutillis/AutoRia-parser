@@ -9,6 +9,9 @@ from .items import AutoriaParserItem
 from .log import LOGGER
 
 
+load_dotenv(verbose=True, override=True)
+
+
 class AutoriaParserPipeline:
 
     def __init__(self) -> None:
