@@ -12,45 +12,10 @@ services:
     build: 
       context: .
     command: >
-      sh -c "echo Scrapy running in background && tail -f /dev/null"
+      sh -c "python3 parser.py"
     volumes:
       - .:/app
     env_file:
       - .env
     depends_on:
         - db
-
-  celery:
-    restart: always
-    build:
-      context: .
-    command: >
-      sh -c "celery -A autoria_parser.celerycore worker -l info"
-    volumes:
-      - .:/app
-    env_file:
-      - .env
-    depends_on:
-      - rabbitmq3
-  
-  beat:
-    build:
-        context: .
-    command: >
-      sh -c "celery -A autoria_parser.celerycore beat -l info --pidfile=/tmp/core.pid"
-    volumes:
-      - .:/app
-    env_file:
-      - .env
-    depends_on:
-      - celery
-      - rabbitmq3
-
-  rabbitmq3:
-    container_name: "rabbitmq"
-    image: rabbitmq:3-management-alpine
-    env_file:
-      - .env
-    ports:
-      - 5672:5672
-      - 15672:15672

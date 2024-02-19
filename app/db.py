@@ -3,16 +3,15 @@ import sys
 import psycopg2
 from datetime import datetime
 from dotenv import load_dotenv
-from scrapy import Spider
 
-from .items import AutoriaParserItem
-from .log import LOGGER
+from dto import Car
+from log import LOGGER
 
 
 load_dotenv(verbose=True, override=True)
 
 
-class AutoriaParserPipeline:
+class PostgresDB:
 
     def __init__(self) -> None:
         self.hostname = os.environ["POSTGRES_HOST"]
@@ -27,6 +26,8 @@ class AutoriaParserPipeline:
             password=self.password,
             dbname=self.database,
         )
+        
+        self.connection.autocommit = True
 
         self.cur = self.connection.cursor()
 
@@ -49,6 +50,13 @@ class AutoriaParserPipeline:
             """
         )
 
+    def __enter__(self) -> None:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.cur.close()
+        self.connection.close()
+
     def create_database_dump(self) -> None:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         file_path = os.path.join("dumps", f"dump_{timestamp}")
@@ -64,7 +72,7 @@ class AutoriaParserPipeline:
             )
             sys.exit(10)
 
-    def process_item(self, item: AutoriaParserItem, spider: Spider) -> dict:
+    def process_item(self, item: Car) -> dict:
         self.cur.execute(
             """INSERT INTO cars (
             url,
@@ -81,41 +89,37 @@ class AutoriaParserPipeline:
         ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
             (
-                item["url"],
-                item["title"],
-                item["price_usd"],
-                item["odometer"],
-                item["username"],
-                item["phone_number"],
-                item["image_url"],
-                item["images_count"],
-                item["car_number"],
-                item["car_vin"],
-                item["datetime_found"],
+                item.url,
+                item.title,
+                item.price_usd,
+                item.odometer,
+                item.username,
+                item.phone_number,
+                item.image_url,
+                item.images_count,
+                item.car_number,
+                item.car_vin,
+                item.datetime_found,
             ),
         )
 
         self.connection.commit()
         return item
 
-    def close_spider(self, spider: Spider) -> None:
-        self.cur.close()
-        self.connection.close()
 
+class PostgresNoDuplicatesDB(PostgresDB):
 
-class AutoriaParserNoDuplicatesPipeline(AutoriaParserPipeline):
-
-    def process_item(self, item: AutoriaParserItem, spider: Spider) -> dict:
+    def process_item(self, item: Car) -> dict:
 
         self.cur.execute(
-            "SELECT * FROM cars WHERE car_vin = %s", (item["car_vin"],)
+            "SELECT * FROM cars WHERE car_vin = %s", (item.car_vin,)
         )
         result = self.cur.fetchone()
         if result:
             LOGGER.warning(
-                "Item already in database. Vin: %s" % item["car_vin"]
+                "Item already in database. Vin: %s" % item.car_vin
             )
-        elif not item["car_vin"]:
+        elif not item.car_vin:
             LOGGER.warning("Item without Vin skipped!")
         else:
             self.cur.execute(
@@ -134,17 +138,17 @@ class AutoriaParserNoDuplicatesPipeline(AutoriaParserPipeline):
             ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
                 (
-                    item["url"],
-                    item["title"],
-                    item["price_usd"],
-                    item["odometer"],
-                    item["username"],
-                    item["phone_number"],
-                    item["image_url"],
-                    item["images_count"],
-                    item["car_number"],
-                    item["car_vin"],
-                    item["datetime_found"],
+                    item.url,
+                    item.title,
+                    item.price_usd,
+                    item.odometer,
+                    item.username,
+                    item.phone_number,
+                    item.image_url,
+                    item.images_count,
+                    item.car_number,
+                    item.car_vin,
+                    item.datetime_found,
                 ),
             )
 
