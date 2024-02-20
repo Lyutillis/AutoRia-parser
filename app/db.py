@@ -3,11 +3,12 @@ import sys
 import psycopg2
 from datetime import datetime
 from dotenv import load_dotenv
-from typing import Any
+from typing import Any, List
+from dataclasses import astuple
 
-from .dto import Car
-from .log import LOGGER
-from .metaclasses import Singleton
+from app.dto import Car
+from app.log import LOGGER
+from app.metaclasses import Singleton
 
 
 load_dotenv(verbose=True, override=True)
@@ -58,50 +59,50 @@ class PostgresDB(Singleton):
         self.cur.close()
         self.connection.close()
 
-    def process_item(self, item: Car) -> dict:
-
+    def process_items(self, items: List[Car]) -> dict:
+        if not items:
+            return
         self.cur.execute(
-            "SELECT * FROM cars WHERE car_vin = %s", (item.car_vin,)
+            "SELECT car_vin FROM cars WHERE car_vin IN %(vins)s",
+            {"vins": tuple([item.car_vin for item in items])}
         )
-        result = self.cur.fetchone()
+        result = [vin[0] for vin in self.cur.fetchall()]
         if result:
-            LOGGER.warning(
-                "Item already in database. Vin: %s" % item.car_vin
-            )
-        else:
-            self.cur.execute(
-                """INSERT INTO cars (
-                url,
-                title,
-                price_usd,
-                odometer,
-                username,
-                phone_number,
-                image_url,
-                images_count,
-                car_number,
-                car_vin,
-                datetime_found
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (car_vin) DO NOTHING
-            """,
-                (
-                    item.url,
-                    item.title,
-                    item.price_usd,
-                    item.odometer,
-                    item.username,
-                    item.phone_number,
-                    item.image_url,
-                    item.images_count,
-                    item.car_number,
-                    item.car_vin,
-                    item.datetime_found,
-                ),
-            )
+            for vin in result:
+                LOGGER.warning(
+                    "Item already in database. Vin: %s" % vin
+                )
 
-            self.connection.commit()
-        return item
+        filtered_items = [
+            item for item in items if item.car_vin not in result
+        ]
+        if filtered_items:
+            args = ",".join(
+                self.cur.mogrify(
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", astuple(item)
+                ).decode("utf-8")
+                for item in filtered_items
+            )
+            if args:
+                self.cur.execute(
+                    """INSERT INTO cars (
+                    url,
+                    title,
+                    price_usd,
+                    odometer,
+                    username,
+                    phone_number,
+                    image_url,
+                    images_count,
+                    car_number,
+                    car_vin,
+                    datetime_found
+                ) VALUES """ + (args)
+                )
+
+                self.connection.commit()
+
+        return items
 
     def create_database_dump(self) -> None:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")

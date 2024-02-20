@@ -1,4 +1,4 @@
-from .log import LOGGER
+from app.log import LOGGER
 
 
 class EmptyPageException(Exception):
