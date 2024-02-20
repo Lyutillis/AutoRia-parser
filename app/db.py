@@ -3,15 +3,17 @@ import sys
 import psycopg2
 from datetime import datetime
 from dotenv import load_dotenv
+from typing import Any
 
-from dto import Car
-from log import LOGGER
+from .dto import Car
+from .log import LOGGER
+from .metaclasses import Singleton
 
 
 load_dotenv(verbose=True, override=True)
 
 
-class PostgresDB:
+class PostgresDB(Singleton):
 
     def __init__(self) -> None:
         self.hostname = os.environ["POSTGRES_HOST"]
@@ -26,9 +28,8 @@ class PostgresDB:
             password=self.password,
             dbname=self.database,
         )
-        
-        self.connection.autocommit = True
 
+        self.connection.autocommit = True
         self.cur = self.connection.cursor()
 
         self.cur.execute(
@@ -57,58 +58,6 @@ class PostgresDB:
         self.cur.close()
         self.connection.close()
 
-    def create_database_dump(self) -> None:
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        file_path = os.path.join("dumps", f"dump_{timestamp}")
-        command = (
-            f"pg_dump --no-owner --dbname=postgresql://{self.username}"
-            f":{self.password}@{self.hostname}:{self.port}/"
-            f"{self.database} > {file_path}"
-        )
-        code = os.system(command)
-        if code:
-            LOGGER.error(
-                f"Error dumping database: code - {code}, command - {command}"
-            )
-            sys.exit(10)
-
-    def process_item(self, item: Car) -> dict:
-        self.cur.execute(
-            """INSERT INTO cars (
-            url,
-            title,
-            price_usd,
-            odometer,
-            username,
-            phone_number,
-            image_url,
-            images_count,
-            car_number,
-            car_vin,
-            datetime_found
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-            (
-                item.url,
-                item.title,
-                item.price_usd,
-                item.odometer,
-                item.username,
-                item.phone_number,
-                item.image_url,
-                item.images_count,
-                item.car_number,
-                item.car_vin,
-                item.datetime_found,
-            ),
-        )
-
-        self.connection.commit()
-        return item
-
-
-class PostgresNoDuplicatesDB(PostgresDB):
-
     def process_item(self, item: Car) -> dict:
 
         self.cur.execute(
@@ -119,8 +68,6 @@ class PostgresNoDuplicatesDB(PostgresDB):
             LOGGER.warning(
                 "Item already in database. Vin: %s" % item.car_vin
             )
-        elif not item.car_vin:
-            LOGGER.warning("Item without Vin skipped!")
         else:
             self.cur.execute(
                 """INSERT INTO cars (
@@ -136,6 +83,7 @@ class PostgresNoDuplicatesDB(PostgresDB):
                 car_vin,
                 datetime_found
             ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (car_vin) DO NOTHING
             """,
                 (
                     item.url,
@@ -154,3 +102,18 @@ class PostgresNoDuplicatesDB(PostgresDB):
 
             self.connection.commit()
         return item
+
+    def create_database_dump(self) -> None:
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        file_path = os.path.join("dumps", f"dump_{timestamp}")
+        command = (
+            f"pg_dump --no-owner --dbname=postgresql://{self.username}"
+            f":{self.password}@{self.hostname}:{self.port}/"
+            f"{self.database} > {file_path}"
+        )
+        code = os.system(command)
+        if code:
+            LOGGER.error(
+                f"Error dumping database: code - {code}, command - {command}"
+            )
+            sys.exit(10)
