@@ -1,3 +1,4 @@
+from pprint import pprint
 import requests
 from urllib.parse import urljoin
 from datetime import datetime
@@ -7,8 +8,8 @@ import json
 import threading
 import time
 
-from .db import PostgresDB, Car
-from .exceptions import (
+from app.db import PostgresDB, Car
+from app.exceptions import (
     EmptyPageException,
     NoVinException,
     SoldException,
@@ -21,6 +22,26 @@ PHONE_URL = "https://auto.ria.com/users/phones/"
 
 
 class CarParser:
+
+    def __init__(self) -> None:
+        self.results = []
+        self.db_is_busy = False
+
+    def bulk_save(self) -> None:
+        while True:
+            time.sleep(0.01)
+            if not self.results:
+                self.db_is_busy = False
+                continue
+
+            self.db_is_busy = True
+
+            with PostgresDB() as db:
+                results = []
+                for item in self.results[:]:
+                    self.results.remove(item)
+                    results.append(item)
+                db.process_items(results)
 
     def get_url(self, car: Selector) -> str:
         return car.xpath(
@@ -135,7 +156,7 @@ class CarParser:
         username, images_count, phone_number = self.parse_detail_page(url=url)
         return Car(
             url=url,
-            title=self.get_url(car),
+            title=self.get_title(car),
             price_usd=self.get_price_usd(car),
             odometer=self.get_odometer(car),
             username=username,
@@ -164,27 +185,50 @@ class CarParser:
 
         for car in cars:
             try:
-                result = self.parse_single_car(Selector(text=car))
-                with PostgresDB() as db:
-                    db.process_item(result)
+                self.results.append(
+                    self.parse_single_car(Selector(text=car))
+                )
             except (SoldException, NoVinException, NoUsernameException):
                 continue
 
     def parse_cars(self) -> None:
-        pages = 100
+        max_threads = 21
+        pages = 150
         current_page = 1
+        db_thread = threading.Thread(
+            target=self.bulk_save,
+            daemon=True,
+        )
+        db_thread.start()
         threads = []
 
         try:
             while current_page <= pages:
-                thread = threading.Thread(
-                    target=self.get_single_page_cars, args=(current_page,)
-                )
-                thread.start()
-                threads.append(thread)
-                current_page += 1
+
+                while True:
+
+                    if threading.active_count() < max_threads:
+                        thread = threading.Thread(
+                            target=self.get_single_page_cars,
+                            args=(current_page,)
+                        )
+                        thread.start()
+                        threads.append(thread)
+                        current_page += 1
+                        break
+
+                    time.sleep(0.01)
+
         except EmptyPageException:
             pass
 
         for thread in threads:
             thread.join()
+
+        while self.db_is_busy:
+            time.sleep(1)
+
+
+if __name__ == "__main__":
+    parser = CarParser()
+    parser.parse_cars()
