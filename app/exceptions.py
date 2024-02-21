@@ -24,3 +24,7 @@ class NoUsernameException(Exception):
         super().__init__(message)
 
         LOGGER.warning("Item without username skipped!")
+
+
+class NotLoadedPageException(Exception):
+    pass
