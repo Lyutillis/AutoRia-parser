@@ -7,7 +7,9 @@ from typing import List, Tuple
 from parsel import Selector
 import json
 import threading
+import multiprocessing
 import time
+from requests.exceptions import ChunkedEncodingError
 
 from app.db import PostgresDB, Car
 from app.exceptions import (
@@ -23,56 +25,50 @@ BASE_URL = "https://auto.ria.com/uk/car/used/"
 PHONE_URL = "https://auto.ria.com/users/phones/"
 
 
-class CarParser:
-    def __init__(self, results: List) -> None:
-        self.results = results
+class AutoriaParser:
+    def __init__(self, html: str, url: str) -> None:
+        self.html = Selector(text=html)
+        self.url = url
 
-    def get_page(self, url: str) -> Selector:
-        while True:
-            response = requests.get(url, stream=False).text
-            page = Selector(text=response)
-
-            if (
-                page.xpath("//*[contains(@class, 'app-head')]")
-                and page.xpath("//*[contains(@class, 'footer-line-wrap')]")
-            ):
-                return page
-
-            time.sleep(1)
-
-    def get_url(self, car: Selector) -> str:
-        return car.xpath(
+    @classmethod
+    def get_urls(cls, html: str) -> str:
+        page = Selector(text=html)
+        return page.xpath(
             (
                 "//*[contains(@class, 'content-bar')]"
                 "//a[contains(@class, 'm-link-ticket')]/@href"
             )
+        ).getall()
+
+    def get_title(self) -> str:
+        return self.html.xpath(
+            "//h1[contains(@class, 'head')]//@title"
         ).get()
 
-    def get_title(self, car: Selector) -> str:
-        return car.xpath(
-            "//*[contains(@class, 'ticket-title')]//a/@title"
+    def get_price_usd(self) -> float:
+        price_usd = self.html.xpath(
+            "//div[contains(@class, 'price_value')]//strong/text()"
         ).get()
+        for char in ("$", "грн", "€"):
+            price_usd = price_usd.replace(char, "")
+        return float(price_usd.strip().replace(" ", ""))
 
-    def get_price_usd(self, car: Selector) -> float:
-        price_usd = car.xpath(
-            "//*[contains(@class, 'price-ticket')]/@data-main-price"
+    def get_odometer(self) -> float:
+        odometer = self.html.xpath(
+            "//div[contains(@class, 'base-information')]//span/text()"
         ).get()
-        return float(price_usd)
+        return float(odometer)
 
-    def get_odometer(self, car: Selector) -> float:
-        odometer = car.xpath("//*[contains(@class, 'js-race')]/text()").get()
-        return float(odometer.split()[0])
-
-    def get_username(self, car: Selector) -> str:
+    def get_username(self) -> str:
         attempts = 3
         while attempts:
             attempts -= 1
             try:
                 username = (
-                    car.xpath(
+                    self.html.xpath(
                         "//*[contains(@class, 'seller_info_name')]//a/text()"
                     ).get(),
-                    car.xpath(
+                    self.html.xpath(
                         "//*[contains(@class, 'seller_info_name')]/text()"
                     ).get()
                 )
@@ -85,12 +81,12 @@ class CarParser:
                 time.sleep(4)
         raise NoUsernameException("Unable to parse the username!")
 
-    def get_phone_number(self, car: Selector) -> str:
-        user_id = car.xpath("//body/@data-auto-id").get()
-        user_hash = car.xpath(
+    def get_phone_number(self) -> str:
+        user_id = self.html.xpath("//body/@data-auto-id").get()
+        user_hash = self.html.xpath(
             "//*[starts-with(@class, 'js-user-secure-')]/@data-hash"
         ).get()
-        expires = car.xpath(
+        expires = self.html.xpath(
             "//*[starts-with(@class, 'js-user-secure-')]/@data-expires"
         ).get()
 
@@ -101,13 +97,18 @@ class CarParser:
             requests.get(phone_url, stream=False).text
         )["formattedPhoneNumber"]
 
-    def get_image_url(self, car: Selector) -> str:
-        return car.xpath("//img[contains(@class, 'outline')]/@src").get()
+    def get_image_url(self) -> str:
+        return self.html.xpath(
+            (
+                "//div[contains(@class, 'carousel-inner')]"
+                "//div//source/@srcset"
+            )
+        ).get()
 
-    def get_images_count(self, car: Selector) -> int:
+    def get_images_count(self) -> int:
         try:
             return int(
-                car.xpath(
+                self.html.xpath(
                     (
                         "//span[contains(@class, 'count')]"
                         "//*[contains(@class, 'mhide')]/text()"
@@ -117,18 +118,22 @@ class CarParser:
         except AttributeError:
             return 0
 
-    def get_car_number(self, car: Selector) -> str:
-        car_number = car.xpath(
+    def get_car_number(self) -> str:
+        car_number = self.html.xpath(
             "//*[contains(@class, 'state-num')]/text()"
         ).get()
         if car_number:
             car_number = car_number.strip()
         return car_number
 
-    def get_car_vin(self, car: Selector) -> str:
+    def get_car_vin(self) -> str:
         car_vin = (
-            car.xpath("//*[contains(@class, 'label-vin')]//span/text()").get(),
-            car.xpath("//*[contains(@class, 'vin-code')]/text()").get(),
+            self.html.xpath(
+                "//span[contains(@class, 'label-vin')]//text()"
+            ).get(),
+            self.html.xpath(
+                "//span[contains(@class, 'vin-code')]/text()"
+            ).get(),
         )
 
         if car_vin[0]:
@@ -138,56 +143,71 @@ class CarParser:
 
         raise NoVinException("Vehicle doesnt have vin-code")
 
-    def parse_detail_page(self, url: str) -> Tuple:
-        car = self.get_page(
-            url
-        )
+    def parse_detail_page(self) -> Car:
 
-        return (
-            self.get_username(car),
-            self.get_images_count(car),
-            self.get_phone_number(car)
-        )
-
-    def parse_single_car(self, car: Selector) -> Car:
-        if car.xpath("//*[contains(@class, 'icon-sold-out')]"):
+        if self.html.xpath("//*[contains(@class, 'icon-sold-out')]"):
             raise SoldException("Vehicle already sold!")
 
-        url = self.get_url(car)
-        username, images_count, phone_number = self.parse_detail_page(url=url)
         return Car(
-            url=url,
-            title=self.get_title(car),
-            price_usd=self.get_price_usd(car),
-            odometer=self.get_odometer(car),
-            username=username,
-            phone_number=phone_number,
-            image_url=self.get_image_url(car),
-            images_count=images_count,
-            car_number=self.get_car_number(car),
-            car_vin=self.get_car_vin(car),
+            url=self.url,
+            title=self.get_title(),
+            price_usd=self.get_price_usd(),
+            odometer=self.get_odometer(),
+            username=self.get_username(),
+            phone_number=self.get_phone_number(),
+            image_url=self.get_image_url(),
+            images_count=self.get_images_count(),
+            car_number=self.get_car_number(),
+            car_vin=self.get_car_vin(),
             datetime_found=datetime.now()
         )
 
-    def get_single_page_cars(
-        self,
-        page_number: int
-    ) -> None:
+    @classmethod
+    def validate(cls, html: str):
+        page = Selector(text=html)
+
+        if (
+            page.xpath("//*[contains(@class, 'app-head')]")
+            and page.xpath("//*[contains(@class, 'footer-line-wrap')]")
+        ):
+            return True
+        elif not page.xpath("//*[contains(@class, 'ticket-item ')]"):
+            raise EmptyPageException("This page is empty!")
+        return False
+
+
+class AutoriaScraper:
+
+    def __init__(self, results: List = []) -> None:
+        self.results = results
+
+    def get_page(self, url: str) -> str:
+        while True:
+            try:
+                response = requests.get(url, stream=False).text
+            except ChunkedEncodingError:
+                continue
+
+            if AutoriaParser.validate(response):
+                return response
+
+            time.sleep(1)
+
+    def get_list_page_data(self, page_number: int) -> None:
         page = self.get_page(
             urljoin(BASE_URL, f"?page={page_number}")
         )
 
-        if not page.xpath("//*[contains(@class, 'ticket-item ')]"):
-            raise EmptyPageException("This page is empty!")
-
         LOGGER.info(f"Parsing page {page_number}")
 
-        cars = page.xpath("//*[contains(@class, 'ticket-item ')]").getall()
-        cars_number = len(cars)
-        for car in cars:
+        urls = AutoriaParser.get_urls(page)
+        cars_number = len(urls)
+        for url in urls:
+            detailed_page = self.get_page(url)
             try:
+                parser = AutoriaParser(detailed_page, url)
                 self.results.append(
-                    self.parse_single_car(Selector(text=car))
+                    parser.parse_detail_page()
                 )
             except (SoldException, NoVinException, NoUsernameException):
                 cars_number -= 1
@@ -197,7 +217,7 @@ class CarParser:
         )
 
 
-class AutoriaSpider:
+class Main:
 
     def __init__(self) -> None:
         self.results: List[Car] = []
@@ -233,7 +253,7 @@ class AutoriaSpider:
             if not thread.is_alive():
                 self.threads.remove(thread)
 
-    def get_data(self) -> None:
+    def run(self) -> None:
         current_page = 1
 
         LOGGER.info("Launched parser")
@@ -243,9 +263,9 @@ class AutoriaSpider:
                 self.clean_threads()
 
                 if len(self.threads) < self.max_threads:
-                    parser = CarParser(self.results)
+                    scraper = AutoriaScraper(self.results)
                     thread = threading.Thread(
-                        target=parser.get_single_page_cars,
+                        target=scraper.get_list_page_data,
                         args=(current_page,)
                     )
                     thread.start()
@@ -266,5 +286,5 @@ class AutoriaSpider:
 
 
 if __name__ == "__main__":
-    parser = AutoriaSpider()
-    parser.get_data()
+    parser = Main()
+    parser.run()

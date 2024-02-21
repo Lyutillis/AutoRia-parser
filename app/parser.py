@@ -25,7 +25,7 @@ BASE_URL = "https://auto.ria.com/uk/car/used/"
 PHONE_URL = "https://auto.ria.com/users/phones/"
 
 
-class Parser:
+class AutoriaParser:
     def __init__(self, html: str, url: str) -> None:
         self.html = Selector(text=html)
         self.url = url
@@ -176,7 +176,7 @@ class Parser:
         return False
 
 
-class Scraper:
+class AutoriaScraper:
 
     def __init__(self, queue) -> None:
         self.queue = queue
@@ -188,25 +188,25 @@ class Scraper:
             except ChunkedEncodingError:
                 continue
 
-            if Parser.validate(response):
+            if AutoriaParser.validate(response):
                 return response
 
             time.sleep(1)
 
-    def scrape_pagination_pages(self, page_number: int) -> None:
+    def get_list_page_data(self, page_number: int) -> None:
         page = self.get_page(
             urljoin(BASE_URL, f"?page={page_number}")
         )
 
         LOGGER.info(f"Parsing page {page_number}")
 
-        urls = Parser.get_urls(page)
+        urls = AutoriaParser.get_urls(page)
         cars_number = len(urls)
         results = []
         for url in urls:
             detailed_page = self.get_page(url)
             try:
-                parser = Parser(detailed_page, url)
+                parser = AutoriaParser(detailed_page, url)
                 results.append(
                     parser.parse_detail_page()
                 )
@@ -226,7 +226,6 @@ class Main:
     def __init__(self) -> None:
         self.processes: List[multiprocessing.Process] = []
         self.queue = multiprocessing.Queue()
-        self.db_is_busy = False
         self.max_processes = 5
         self.pages = 150
         self.db_thread = threading.Thread(
@@ -256,9 +255,9 @@ class Main:
                 self.clean_processes()
 
                 if len(self.processes) < self.max_processes:
-                    scraper = Scraper(self.queue)
+                    scraper = AutoriaScraper(self.queue)
                     process = multiprocessing.Process(
-                        target=scraper.scrape_pagination_pages,
+                        target=scraper.get_list_page_data,
                         args=(current_page,)
                     )
                     process.start()
@@ -273,9 +272,6 @@ class Main:
 
         for process in self.processes:
             process.join()
-
-        while self.db_is_busy:
-            time.sleep(0.1)
 
 
 if __name__ == "__main__":
