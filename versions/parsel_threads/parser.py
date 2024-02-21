@@ -7,9 +7,7 @@ from typing import List, Tuple
 from parsel import Selector
 import json
 import threading
-import multiprocessing
 import time
-from requests.exceptions import ChunkedEncodingError
 
 from app.db import PostgresDB, Car
 from app.exceptions import (
@@ -26,16 +24,12 @@ PHONE_URL = "https://auto.ria.com/users/phones/"
 
 
 class CarParser:
-    def __init__(self, queue: multiprocessing.Queue) -> None:
-        self.queue = queue
+    def __init__(self, results: List) -> None:
+        self.results = results
 
     def get_page(self, url: str) -> Selector:
         while True:
-            try:
-                response = requests.get(url, stream=False).text
-            except ChunkedEncodingError:
-                continue
-
+            response = requests.get(url, stream=False).text
             page = Selector(text=response)
 
             if (
@@ -190,16 +184,14 @@ class CarParser:
 
         cars = page.xpath("//*[contains(@class, 'ticket-item ')]").getall()
         cars_number = len(cars)
-        results = []
         for car in cars:
             try:
-                results.append(self.parse_single_car(Selector(text=car)))
+                self.results.append(
+                    self.parse_single_car(Selector(text=car))
+                )
             except (SoldException, NoVinException, NoUsernameException):
                 cars_number -= 1
                 continue
-        self.queue.put(
-            results
-        )
         LOGGER.info(
             f"Finished parsing page {page_number}. Cars number: {cars_number}."
         )
@@ -208,10 +200,10 @@ class CarParser:
 class AutoriaSpider:
 
     def __init__(self) -> None:
-        self.processes: List[multiprocessing.Process] = []
-        self.queue = multiprocessing.Queue()
+        self.results: List[Car] = []
+        self.threads: List[threading.Thread] = []
         self.db_is_busy = False
-        self.max_processes = 5
+        self.max_threads = 21
         self.pages = 150
         self.db_thread = threading.Thread(
             target=self.bulk_save,
@@ -221,14 +213,25 @@ class AutoriaSpider:
 
     def bulk_save(self) -> None:
         while True:
-            results = self.queue.get()
+
+            time.sleep(0.01)
+            if not self.results:
+                self.db_is_busy = False
+                continue
+
+            self.db_is_busy = True
+
             with PostgresDB() as db:
+                results = []
+                for item in self.results[:]:
+                    self.results.remove(item)
+                    results.append(item)
                 db.process_items(results)
 
-    def clean_processes(self) -> None:
-        for process in self.processes:
-            if not process.is_alive():
-                self.processes.remove(process)
+    def clean_threads(self) -> None:
+        for thread in self.threads:
+            if not thread.is_alive():
+                self.threads.remove(thread)
 
     def get_data(self) -> None:
         current_page = 1
@@ -237,16 +240,16 @@ class AutoriaSpider:
 
         try:
             while current_page <= self.pages:
-                self.clean_processes()
+                self.clean_threads()
 
-                if len(self.processes) < self.max_processes:
-                    parser = CarParser(self.queue)
-                    process = multiprocessing.Process(
+                if len(self.threads) < self.max_threads:
+                    parser = CarParser(self.results)
+                    thread = threading.Thread(
                         target=parser.get_single_page_cars,
                         args=(current_page,)
                     )
-                    process.start()
-                    self.processes.append(process)
+                    thread.start()
+                    self.threads.append(thread)
                     current_page += 1
                     continue
 
@@ -255,8 +258,8 @@ class AutoriaSpider:
         except EmptyPageException:
             pass
 
-        for process in self.processes:
-            process.join()
+        for thread in self.threads:
+            thread.join()
 
         while self.db_is_busy:
             time.sleep(0.1)

@@ -15,7 +15,6 @@ load_dotenv(verbose=True, override=True)
 
 
 class PostgresDB(Singleton):
-
     def __init__(self) -> None:
         self.hostname = os.environ["POSTGRES_HOST"]
         self.username = os.environ["POSTGRES_USER"]
@@ -59,50 +58,49 @@ class PostgresDB(Singleton):
         self.cur.close()
         self.connection.close()
 
-    def process_items(self, items: List[Car]) -> dict:
+    def process_items(self, items: List[Car]) -> None:
         if not items:
             return
+
         self.cur.execute(
             "SELECT car_vin FROM cars WHERE car_vin IN %(vins)s",
-            {"vins": tuple([item.car_vin for item in items])}
+            {
+                "vins": tuple([item.car_vin for item in items])
+            },
         )
         result = [vin[0] for vin in self.cur.fetchall()]
         if result:
             for vin in result:
-                LOGGER.warning(
-                    "Item already in database. Vin: %s" % vin
-                )
+                LOGGER.warning("Item already in database. Vin: %s" % vin)
+            items = [item for item in items if item.car_vin not in result]
 
-        filtered_items = [
-            item for item in items if item.car_vin not in result
-        ]
-        if filtered_items:
+        if items:
             args = ",".join(
                 self.cur.mogrify(
-                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", astuple(item)
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    astuple(item)
                 ).decode("utf-8")
-                for item in filtered_items
+                for item in items
             )
             if args:
                 self.cur.execute(
                     """INSERT INTO cars (
-                    url,
-                    title,
-                    price_usd,
-                    odometer,
-                    username,
-                    phone_number,
-                    image_url,
-                    images_count,
-                    car_number,
-                    car_vin,
-                    datetime_found
-                ) VALUES """ + (args)
+                        url,
+                        title,
+                        price_usd,
+                        odometer,
+                        username,
+                        phone_number,
+                        image_url,
+                        images_count,
+                        car_number,
+                        car_vin,
+                        datetime_found
+                    ) VALUES """
+                    + (args)
                 )
 
                 self.connection.commit()
-
-        return items
 
     def create_database_dump(self) -> None:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
