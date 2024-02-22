@@ -2,25 +2,25 @@ import os
 import sys
 import psycopg2
 from datetime import datetime
-from dotenv import load_dotenv
 from typing import List
 from dataclasses import astuple
 
 from utils.dto import Car
-from utils.log import LOGGER
+from utils.log import get_logger
 from utils.metaclasses import Singleton
+import envs
 
 
-load_dotenv(verbose=True, override=True)
+db_logger = get_logger("Database")
 
 
 class PostgresDB(Singleton):
     def __init__(self) -> None:
-        self.hostname = os.environ["POSTGRES_HOST"]
-        self.username = os.environ["POSTGRES_USER"]
-        self.password = os.environ["POSTGRES_PASSWORD"]
-        self.database = os.environ["POSTGRES_DB"]
-        self.port = os.environ["POSTGRES_PORT"]
+        self.hostname = envs.POSTGRES_HOST
+        self.username = envs.POSTGRES_USER
+        self.password = envs.POSTGRES_PASSWORD
+        self.database = envs.POSTGRES_DB
+        self.port = envs.POSTGRES_PORT
 
         self.connection = psycopg2.connect(
             host=self.hostname,
@@ -71,7 +71,7 @@ class PostgresDB(Singleton):
         result = [vin[0] for vin in self.cur.fetchall()]
         if result:
             for vin in result:
-                LOGGER.warning("Item already in database. Vin: %s" % vin)
+                db_logger.warning("Item already in database. Vin: %s" % vin)
             items = [item for item in items if item.car_vin not in result]
 
         if items:
@@ -112,7 +112,7 @@ class PostgresDB(Singleton):
         )
         code = os.system(command)
         if code:
-            LOGGER.error(
+            db_logger.error(
                 f"Error dumping database: code - {code}, command - {command}"
             )
             sys.exit(10)

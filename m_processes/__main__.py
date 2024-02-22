@@ -1,6 +1,6 @@
-from m_processes.run_processes import AutoriaScraper
+from m_processes.run_processes import ProcessRunner
 
 
 if __name__ == "__main__":
-    scraper = AutoriaScraper()
+    scraper = ProcessRunner()
     scraper.run()
