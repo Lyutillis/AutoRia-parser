@@ -1,27 +1,19 @@
-from ast import Attribute
-from pprint import pprint
 import requests
 from urllib.parse import urljoin
 from datetime import datetime
-from typing import List, Tuple
 from parsel import Selector
 import json
-import threading
-import multiprocessing
 import time
-from requests.exceptions import ChunkedEncodingError
 
-from app.db import PostgresDB, Car
-from app.exceptions import (
+from utils.dto import Car
+from utils.exceptions import (
     EmptyPageException,
     NoVinException,
     SoldException,
     NoUsernameException
 )
-from app.log import LOGGER
 
 
-BASE_URL = "https://auto.ria.com/uk/car/used/"
 PHONE_URL = "https://auto.ria.com/users/phones/"
 
 
@@ -29,16 +21,6 @@ class AutoriaParser:
     def __init__(self, html: str, url: str) -> None:
         self.html = Selector(text=html)
         self.url = url
-
-    @classmethod
-    def get_urls(cls, html: str) -> str:
-        page = Selector(text=html)
-        return page.xpath(
-            (
-                "//*[contains(@class, 'content-bar')]"
-                "//a[contains(@class, 'm-link-ticket')]/@href"
-            )
-        ).getall()
 
     def get_title(self) -> str:
         return self.html.xpath(
@@ -93,6 +75,7 @@ class AutoriaParser:
         phone_url = urljoin(
             PHONE_URL, f"{user_id}?hash={user_hash}&expires={expires}"
         )
+
         return "+38" + json.loads(
             requests.get(phone_url, stream=False).text
         )["formattedPhoneNumber"]
@@ -145,7 +128,7 @@ class AutoriaParser:
 
     def parse_detail_page(self) -> Car:
 
-        if self.html.xpath("//*[contains(@class, 'icon-sold-out')]"):
+        if self.html.xpath("//*[contains(@class, 'sold-out')]"):
             raise SoldException("Vehicle already sold!")
 
         return Car(
@@ -175,105 +158,12 @@ class AutoriaParser:
             raise EmptyPageException("This page is empty!")
         return False
 
-
-class AutoriaScraper:
-
-    def __init__(self, queue) -> None:
-        self.queue = queue
-
-    def get_page(self, url: str) -> str:
-        while True:
-            try:
-                response = requests.get(url, stream=False).text
-            except ChunkedEncodingError:
-                continue
-
-            if AutoriaParser.validate(response):
-                return response
-
-            time.sleep(1)
-
-    def get_list_page_data(self, page_number: int) -> None:
-        page = self.get_page(
-            urljoin(BASE_URL, f"?page={page_number}")
-        )
-
-        LOGGER.info(f"Parsing page {page_number}")
-
-        urls = AutoriaParser.get_urls(page)
-        cars_number = len(urls)
-        results = []
-        for url in urls:
-            detailed_page = self.get_page(url)
-            try:
-                parser = AutoriaParser(detailed_page, url)
-                results.append(
-                    parser.parse_detail_page()
-                )
-            except (SoldException, NoVinException, NoUsernameException):
-                cars_number -= 1
-                continue
-        self.queue.put(
-            results
-        )
-        LOGGER.info(
-            f"Finished parsing page {page_number}. Cars number: {cars_number}."
-        )
-
-
-class Main:
-
-    def __init__(self) -> None:
-        self.processes: List[multiprocessing.Process] = []
-        self.queue = multiprocessing.Queue()
-        self.max_processes = 5
-        self.pages = 150
-        self.db_thread = threading.Thread(
-            target=self.bulk_save,
-            daemon=True,
-        )
-        self.db_thread.start()
-
-    def bulk_save(self) -> None:
-        while True:
-            results = self.queue.get()
-            with PostgresDB() as db:
-                db.process_items(results)
-
-    def clean_processes(self) -> None:
-        for process in self.processes:
-            if not process.is_alive():
-                self.processes.remove(process)
-
-    def run(self) -> None:
-        current_page = 1
-
-        LOGGER.info("Launched parser")
-
-        try:
-            while current_page <= self.pages:
-                self.clean_processes()
-
-                if len(self.processes) < self.max_processes:
-                    scraper = AutoriaScraper(self.queue)
-                    process = multiprocessing.Process(
-                        target=scraper.get_list_page_data,
-                        args=(current_page,)
-                    )
-                    process.start()
-                    self.processes.append(process)
-                    current_page += 1
-                    continue
-
-                time.sleep(0.01)
-
-        except EmptyPageException:
-            pass
-
-        for process in self.processes:
-            process.join()
-
-
-if __name__ == "__main__":
-    parser = Main()
-    parser.run()
+    @classmethod
+    def get_urls(cls, html: str) -> str:
+        page = Selector(text=html)
+        return page.xpath(
+            (
+                "//*[contains(@class, 'content-bar')]"
+                "//a[contains(@class, 'm-link-ticket')]/@href"
+            )
+        ).getall()
