@@ -3,12 +3,12 @@ import sys
 import psycopg2
 from datetime import datetime
 from dotenv import load_dotenv
-from typing import Any, List
+from typing import List
 from dataclasses import astuple
 
-from app.dto import Car
-from app.log import LOGGER
-from app.metaclasses import Singleton
+from utils.dto import Car
+from utils.log import LOGGER
+from utils.metaclasses import Singleton
 
 
 load_dotenv(verbose=True, override=True)
