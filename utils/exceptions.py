@@ -1,4 +1,7 @@
-from utils.log import LOGGER
+from utils.log import get_logger
+
+
+exc_logger = get_logger("Exceptions")
 
 
 class EmptyPageException(Exception):
@@ -9,21 +12,21 @@ class NoVinException(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
 
-        LOGGER.warning("Item without Vin skipped!")
+        exc_logger.warning("Item without Vin skipped!")
 
 
 class SoldException(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
 
-        LOGGER.warning("Sold item skipped!")
+        exc_logger.warning("Sold item skipped!")
 
 
 class NoUsernameException(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
 
-        LOGGER.warning("Item without username skipped!")
+        exc_logger.warning("Item without username skipped!")
 
 
 class NotLoadedPageException(Exception):

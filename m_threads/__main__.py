@@ -5,7 +5,7 @@ import threading
 import time
 from requests.exceptions import ChunkedEncodingError
 
-from database.db import PostgresDB, Car
+from database.db_layer import PostgresDB, Car
 from parsers.parser import AutoriaParser
 from utils.exceptions import (
     EmptyPageException,
@@ -13,10 +13,12 @@ from utils.exceptions import (
     SoldException,
     NoUsernameException
 )
-from utils.log import LOGGER
+from utils.log import get_logger
+import envs
 
 
 BASE_URL = "https://auto.ria.com/uk/car/used/"
+scraper_logger = get_logger("AutoriaScraper")
 
 
 class AutoriaScraper:
@@ -26,7 +28,7 @@ class AutoriaScraper:
         self.threads: List[threading.Thread] = []
         self.db_is_busy = False
         self.max_threads = 21
-        self.pages = 150
+        self.pages = envs.PAGES
         self.db_thread = threading.Thread(
             target=self.bulk_save,
             daemon=True,
@@ -63,7 +65,7 @@ class AutoriaScraper:
             urljoin(BASE_URL, f"?page={page_number}")
         )
 
-        LOGGER.info(f"Parsing page {page_number}")
+        scraper_logger.info(f"Parsing page {page_number}")
 
         urls = AutoriaParser.get_urls(page)
         cars_number = len(urls)
@@ -78,14 +80,14 @@ class AutoriaScraper:
                 cars_number -= 1
                 continue
 
-        LOGGER.info(
+        scraper_logger.info(
             f"Finished parsing page {page_number}. Cars number: {cars_number}."
         )
 
     def run(self) -> None:
         current_page = 1
 
-        LOGGER.info("Launched parser")
+        scraper_logger.info("Launched parser")
 
         try:
             while current_page <= self.pages:
@@ -111,6 +113,8 @@ class AutoriaScraper:
 
         while self.db_is_busy:
             time.sleep(0.1)
+        
+        scraper_logger.info("Finished parsing")
 
     @classmethod
     def get_page(self, url: str) -> str:
