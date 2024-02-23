@@ -22,3 +22,7 @@ try:
 except Exception as e:
     print(e)
     exit()
+
+
+if __name__ == "__main__":
+    print(PAGES)
