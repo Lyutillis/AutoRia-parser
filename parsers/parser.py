@@ -7,7 +7,6 @@ import time
 
 from utils.dto import Car
 from utils.exceptions import (
-    EmptyPageException,
     NoVinException,
     SoldException,
     NoUsernameException
@@ -45,22 +44,18 @@ class AutoriaParser:
         attempts = 3
         while attempts:
             attempts -= 1
-            try:
-                username = (
-                    self.html.xpath(
-                        "//*[contains(@class, 'seller_info_name')]//a/text()"
-                    ).get(),
-                    self.html.xpath(
-                        "//*[contains(@class, 'seller_info_name')]/text()"
-                    ).get()
-                )
-                if username[0]:
-                    return username[0].strip()
-                elif username[1]:
-                    return username[1].strip()
-
-            except AttributeError:
-                time.sleep(4)
+            username = (
+                self.html.xpath(
+                    "//*[contains(@class, 'seller_info_name')]//a/text()"
+                ).get(),
+                self.html.xpath(
+                    "//*[contains(@class, 'seller_info_name')]/text()"
+                ).get()
+            )
+            if username[0]:
+                return username[0].strip()
+            elif username[1]:
+                return username[1].strip()
         raise NoUsernameException("Unable to parse the username!")
 
     def get_phone_number(self) -> str:
@@ -89,17 +84,15 @@ class AutoriaParser:
         ).get()
 
     def get_images_count(self) -> int:
-        try:
-            return int(
-                self.html.xpath(
-                    (
-                        "//span[contains(@class, 'count')]"
-                        "//*[contains(@class, 'mhide')]/text()"
-                    )
-                ).get().split()[1]
+        count = self.html.xpath(
+            (
+                "//span[contains(@class, 'count')]"
+                "//*[contains(@class, 'mhide')]/text()"
             )
-        except AttributeError:
-            return 0
+        ).get()
+        if count:
+            return int(count.split()[1])
+        return 0
 
     def get_car_number(self) -> str:
         car_number = self.html.xpath(
@@ -154,9 +147,14 @@ class AutoriaParser:
             and page.xpath("//*[contains(@class, 'footer-line-wrap')]")
         ):
             return True
-        elif not page.xpath("//*[contains(@class, 'ticket-item ')]"):
-            raise EmptyPageException("This page is empty!")
         return False
+
+    @classmethod
+    def check_list_page(self, html: str):
+        page = Selector(text=html)
+        if not page.xpath("//*[contains(@class, 'ticket-item ')]"):
+            return False
+        return True
 
     @classmethod
     def get_urls(cls, html: str) -> str:
