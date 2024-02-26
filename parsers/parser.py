@@ -91,9 +91,9 @@ class AutoriaParserV1(AutoriaParser):
 
     def get_phone_number(self) -> str:
         phone_number = self.html.xpath(
-            "//div[contains(@class, 'popup-successful-call-desk')]/@data-value"
-        )
-
+            "//div[@id='show-phone']"
+            "//div[contains(@class, 'popup-successful-call-desk')]/text()"
+        ).get()
         return "+38" + phone_number
 
     def get_image_url(self) -> str:
@@ -189,8 +189,9 @@ class AutoriaParserV2(AutoriaParser):
 
     def get_phone_number(self) -> str:
         phone_number = self.html.xpath(
-            "//span[@class='common-text action')]/text()"
-        )
+            "(//div[@id='autoPhonePopUpResponse')]"
+            "//button[@class='s1 conversion']//span/text()"
+        ).get()
 
         return "+38" + phone_number
 

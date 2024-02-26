@@ -9,7 +9,7 @@ except Exception:
 env = Env()
 
 try:
-    env.read_env(".env")
+    env.read_env(".env", override=True)
 
     POSTGRES_HOST = env.str("POSTGRES_HOST")
     POSTGRES_USER = env.str("POSTGRES_USER")
