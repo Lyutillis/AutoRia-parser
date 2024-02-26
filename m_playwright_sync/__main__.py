@@ -1,16 +1,13 @@
 import requests
 from urllib.parse import urljoin
 from typing import List
-import threading
 import time
-import playwright
 from requests.exceptions import ChunkedEncodingError
 from playwright.sync_api import sync_playwright
 
 from database.db_layer import PostgresDB, Car
 from parsers.parser import AutoriaParser, AutoriaParserV1, AutoriaParserV2
 from utils.exceptions import (
-    EmptyPageException,
     NoVinException,
     SoldException,
     NoUsernameException
@@ -37,6 +34,41 @@ class AutoriaScraper:
     def accept_cookies(self, page):
         page.get_by_text("Розумію і дозволяю").click()
 
+    def scrape_list_page(self, page, page_number: int) -> None:
+        page.goto(urljoin(BASE_URL, f"?page={page_number}"))
+        content = page.content()
+
+        if not AutoriaParser.check_list_page(content):
+            scraper_logger.warning("Reached last page. Terminating...")
+            return True
+
+        urls = AutoriaParser.get_urls(content)
+        scraper_logger.info(f"Parsing page {page_number}")
+        for url in urls:
+            page.goto(url)
+            content = page.content()
+
+            if page.query_selector(
+                "//*[contains(@class, 'phone_show_link')]"
+            ):
+                page.locator(
+                    "(//*[contains(@class, 'phone_show_link')])[1]"
+                ).click()
+                parser = AutoriaParserV1(content, url)
+            else:
+                page.locator(
+                    "(//*[contains(@class, 's1 elevated')])[1]"
+                ).click()
+                parser = AutoriaParserV2(content, url)
+
+            try:
+                self.results.append(parser.parse_detail_page())
+            except (NoVinException, NoUsernameException, SoldException):
+                continue
+
+        self.bulk_save()
+        scraper_logger.info(f"Finished parsing page {page_number}")
+
     def run(self) -> None:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
@@ -52,41 +84,9 @@ class AutoriaScraper:
             page.goto(BASE_URL)
             self.accept_cookies(page)
 
-            # page.wait_for_selector(
-            #     "//*[contains(@class, ['app-header'])]"
-            #     "//*[contains(@class, 'social-section-wrapper')]",
-            # )
-
             while current_page <= self.pages:
-                page.goto(urljoin(BASE_URL, f"?page={current_page}"))
-                content = page.content()
-
-                if not AutoriaParser.check_list_page(content):
-                    scraper_logger.warning("Reached last page. Terminating...")
+                if self.scrape_list_page(page, current_page):
                     break
-
-                urls = AutoriaParser.get_urls(content)
-
-                for url in urls:
-                    page.goto(url)
-                    content = page.content()
-
-                    if page.query_selector(
-                        "//*[contains(@class, 'phone_show_link')]"
-                    ):
-                        page.locator(
-                            "//*[contains(@class, 'phone_show_link')]"
-                        ).click()
-                        parser = AutoriaParserV1(content, url)
-                    else:
-                        page.locator(
-                            "//*[contains(@data-action, 'showBottomPopUp')]"
-                        ).click()
-                        parser = AutoriaParserV2(content, url)
-
-                    self.results.append(parser.parse_detail_page())
-
-                self.bulk_save()
 
                 current_page += 1
 
