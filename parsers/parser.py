@@ -21,6 +21,37 @@ class AutoriaParser:
         self.html = Selector(text=html)
         self.url = url
 
+    @classmethod
+    def validate(cls, html: str):
+        page = Selector(text=html)
+
+        if (
+            page.xpath("//*[contains(@class, 'app-head')]")
+            and page.xpath("//*[contains(@class, 'footer-line-wrap')]")
+        ):
+            return True
+        return False
+
+    @classmethod
+    def check_list_page(self, html: str):
+        page = Selector(text=html)
+        if not page.xpath("//*[contains(@class, 'ticket-item ')]"):
+            return False
+        return True
+
+    @classmethod
+    def get_urls(cls, html: str) -> str:
+        page = Selector(text=html)
+        return page.xpath(
+            (
+                "//*[contains(@class, 'content-bar')]"
+                "//a[contains(@class, 'm-link-ticket')]/@href"
+            )
+        ).getall()
+
+
+class AutoriaParserV1(AutoriaParser):
+
     def get_title(self) -> str:
         return self.html.xpath(
             "//h1[contains(@class, 'head')]//@title"
@@ -59,21 +90,11 @@ class AutoriaParser:
         raise NoUsernameException("Unable to parse the username!")
 
     def get_phone_number(self) -> str:
-        user_id = self.html.xpath("//body/@data-auto-id").get()
-        user_hash = self.html.xpath(
-            "//*[starts-with(@class, 'js-user-secure-')]/@data-hash"
-        ).get()
-        expires = self.html.xpath(
-            "//*[starts-with(@class, 'js-user-secure-')]/@data-expires"
-        ).get()
-
-        phone_url = urljoin(
-            PHONE_URL, f"{user_id}?hash={user_hash}&expires={expires}"
+        phone_number = self.html.xpath(
+            "//div[contains(@class, 'popup-successful-call-desk')]/@data-value"
         )
 
-        return "+38" + json.loads(
-            requests.get(phone_url, stream=False).text
-        )["formattedPhoneNumber"]
+        return "+38" + phone_number
 
     def get_image_url(self) -> str:
         return self.html.xpath(
@@ -138,30 +159,93 @@ class AutoriaParser:
             datetime_found=datetime.now()
         )
 
-    @classmethod
-    def validate(cls, html: str):
-        page = Selector(text=html)
 
-        if (
-            page.xpath("//*[contains(@class, 'app-head')]")
-            and page.xpath("//*[contains(@class, 'footer-line-wrap')]")
-        ):
-            return True
-        return False
+class AutoriaParserV2(AutoriaParser):
 
-    @classmethod
-    def check_list_page(self, html: str):
-        page = Selector(text=html)
-        if not page.xpath("//*[contains(@class, 'ticket-item ')]"):
-            return False
-        return True
+    def get_title(self) -> str:
+        return self.html.xpath(
+            "//h1[contains(@class, 'titleXl')]/text()"
+        ).get()
 
-    @classmethod
-    def get_urls(cls, html: str) -> str:
-        page = Selector(text=html)
-        return page.xpath(
+    def get_price_usd(self) -> float:
+        price_usd = self.html.xpath(
+            "//div[@id='sidePrice']//strong[contains(@class, 'titleL')]/text()"
+        ).get()
+        for char in ("$", "грн", "€"):
+            price_usd = price_usd.replace(char, "")
+        return float(price_usd.strip().replace(" ", ""))
+
+    def get_odometer(self) -> float:
+        odometer = self.html.xpath(
+            "//div[@id='basicInfoTableMainInfoLeft0']//span/text()"
+        ).get().split()[0]
+        return float(odometer)
+
+    def get_username(self) -> str:
+        username = self.html.xpath(
+            "//div[@id='sellerInfoUserName')]//span/text()"
+        ).get(),
+        return username.strip()
+
+    def get_phone_number(self) -> str:
+        phone_number = self.html.xpath(
+            "//span[@class='common-text action')]/text()"
+        )
+
+        return "+38" + phone_number
+
+    def get_image_url(self) -> str:
+        return self.html.xpath(
             (
-                "//*[contains(@class, 'content-bar')]"
-                "//a[contains(@class, 'm-link-ticket')]/@href"
+                "//div[contains(@class, 'swiper-slide-active')]"
+                "//source/@srcset"
+            )
+        ).get()
+
+    def get_images_count(self) -> int:
+        count = self.html.xpath(
+            (
+                "//span[@class='common-badge alpha medium')]"
+                "//span/text()"
             )
         ).getall()
+        if count:
+            return int(count[1])
+        return 0
+
+    def get_car_number(self) -> str:
+        car_number = self.html.xpath(
+            "//div[contains(@class, 'car-number')]//span/text()"
+        ).get()
+        if car_number:
+            car_number = car_number.strip()
+        return car_number
+
+    def get_car_vin(self) -> str:
+        car_vin = self.html.xpath(
+            "//*[@id='badgesVinGrid')]"
+            "//span[contains(@class, 'common-text body')//text()"
+        ).get()
+
+        if car_vin:
+            return car_vin.strip()
+        return car_vin
+
+    def parse_detail_page(self) -> Car:
+
+        if self.html.xpath("//*[contains(@class, 'selled-auto')]"):
+            raise SoldException("Vehicle already sold!")
+
+        return Car(
+            url=self.url,
+            title=self.get_title(),
+            price_usd=self.get_price_usd(),
+            odometer=self.get_odometer(),
+            username=self.get_username(),
+            phone_number=self.get_phone_number(),
+            image_url=self.get_image_url(),
+            images_count=self.get_images_count(),
+            car_number=self.get_car_number(),
+            car_vin=self.get_car_vin(),
+            datetime_found=datetime.now()
+        )
