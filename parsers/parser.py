@@ -3,7 +3,6 @@ from urllib.parse import urljoin
 from datetime import datetime
 from parsel import Selector
 import json
-import time
 
 from utils.dto import Car
 from utils.exceptions import (
@@ -72,29 +71,36 @@ class AutoriaParserV1(AutoriaParser):
         return float(odometer)
 
     def get_username(self) -> str:
-        attempts = 3
-        while attempts:
-            attempts -= 1
-            username = (
-                self.html.xpath(
-                    "//*[contains(@class, 'seller_info_name')]//a/text()"
-                ).get(),
-                self.html.xpath(
-                    "//*[contains(@class, 'seller_info_name')]/text()"
-                ).get()
-            )
-            if username[0]:
-                return username[0].strip()
-            elif username[1]:
-                return username[1].strip()
+        username = (
+            self.html.xpath(
+                "//*[contains(@class, 'seller_info_name')]//a/text()"
+            ).get(),
+            self.html.xpath(
+                "//*[contains(@class, 'seller_info_name')]/text()"
+            ).get()
+        )
+        if username[0]:
+            return username[0].strip()
+        elif username[1]:
+            return username[1].strip()
+
         raise NoUsernameException("Unable to parse the username!")
 
     def get_phone_number(self) -> str:
-        phone_number = self.html.xpath(
-            "//div[@id='show-phone']"
-            "//div[contains(@class, 'popup-successful-call-desk')]/text()"
+        user_id = self.url.replace(".html", "").split("_")[-1]
+        user_hash = self.html.xpath(
+            "//*[starts-with(@class, 'js-user-secure-')]//@data-hash"
         ).get()
-        return "+38" + phone_number
+        expires = self.html.xpath(
+            "//*[starts-with(@class, 'js-user-secure-')]//@data-expires"
+        ).get()
+        phone_url = urljoin(
+            PHONE_URL, f"{user_id}?hash={user_hash}&expires={expires}"
+        )
+        response = json.loads(
+            requests.get(phone_url, stream=False).text
+        )["formattedPhoneNumber"]
+        return "+38" + response
 
     def get_image_url(self) -> str:
         return self.html.xpath(

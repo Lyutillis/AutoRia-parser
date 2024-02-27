@@ -51,7 +51,7 @@ class AutoriaScraper:
 
     def clean_tasks(self) -> None:
         for task in self.tasks:
-            if not task.done():
+            if task.done():
                 self.tasks.remove(task)
 
     async def get_list_car_data(
