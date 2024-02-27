@@ -36,6 +36,7 @@ class AutoriaScraper:
         self.pages: int = envs.PAGES
 
         self.tasks: List[asyncio.Task] = []
+        self.db_task: asyncio.Task = None
         self.max_tasks: int = 2
 
         self.db_is_busy: bool = False
@@ -46,9 +47,7 @@ class AutoriaScraper:
         self.context: BrowserContext = None
 
     def start_db(self) -> None:
-        self.tasks.append(
-            asyncio.create_task(self.bulk_save())
-        )
+        self.db_task = asyncio.create_task(self.bulk_save())
 
     async def bulk_save(self) -> None:
         while not self.global_stop or self.db_is_busy:
@@ -67,6 +66,7 @@ class AutoriaScraper:
                     self.results.remove(item)
                     results.append(item)
                 await asyncio.to_thread(db.process_items, results)
+
         scraper_logger.info("Database was shut down")
 
     async def start_playwright(self) -> None:
@@ -165,7 +165,6 @@ class AutoriaScraper:
                     self.tasks.append(task)
                     current_page += 1
                     continue
-
                 await asyncio.sleep(0.01)
         finally:
             await asyncio.gather(*self.tasks)
@@ -173,7 +172,7 @@ class AutoriaScraper:
             self.global_stop = True
 
             while self.db_is_busy:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
 
             await self.stop_playwright()
 
