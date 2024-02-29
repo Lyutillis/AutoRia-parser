@@ -1,5 +1,4 @@
 import asyncio
-from queue import Empty
 import requests
 from urllib.parse import urljoin
 from typing import List
@@ -11,9 +10,7 @@ from playwright.async_api import (
     BrowserContext,
     Page
 )
-from parsel import Selector
 
-from database.db_layer import PostgresDB, Car
 from parsers.parser import AutoriaParser, AutoriaParserV1, AutoriaParserV2
 from utils.exceptions import (
     EmptyPageException,
@@ -23,6 +20,7 @@ from utils.exceptions import (
 )
 from utils.log import get_logger
 import envs
+from database.dal import Car, DAL
 
 
 BASE_URL = "https://auto.ria.com/uk/car/used/"
@@ -50,7 +48,7 @@ class AutoriaScraper:
         self.db_task = asyncio.create_task(self.bulk_save())
 
     async def bulk_save(self) -> None:
-        while not self.global_stop or self.db_is_busy:
+        while not self.global_stop:
 
             await asyncio.sleep(0.01)
 
@@ -60,7 +58,7 @@ class AutoriaScraper:
 
             self.db_is_busy = True
 
-            with PostgresDB() as db:
+            with DAL() as db:
                 results: list = []
                 for item in self.results[:]:
                     self.results.remove(item)
