@@ -15,3 +15,17 @@ class Car:
     car_number: str
     car_vin: str
     datetime_found: datetime
+
+
+@dataclass
+class Task:
+    id: int
+    page_number: int
+    in_work: bool
+    completed: bool
+
+
+@dataclass
+class Result:
+    task_id: int
+    car: Car

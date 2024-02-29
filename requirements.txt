@@ -10,3 +10,7 @@ requests
 parsel
 loguru
 playwright
+redis
+sqlalchemy
+alembic
+dacite
