@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Literal
 import json
 from dataclasses import asdict
 from dacite import from_dict
@@ -15,22 +15,24 @@ orchestrator_logger = get_logger("Orchestrator")
 
 
 class Orchestrator:
-    def __init__(self) -> None:
+    def __init__(self, db_type: Literal["postgresql", "mongodb"]) -> None:
         self.tasks: List[Task] = []
         self.results: List[Result] = []
         self.cache_0: Cache = Cache(0)
 
+        self.task_dal: TaskDAL = TaskDAL(db_type)
+        self.result_dal: ResultDAL = ResultDAL(db_type)
+
     def create_tasks(self) -> None:
-        with TaskDAL() as db:
-            db.create_tasks()
+        self.task_dal.create_tasks()
 
     def reset_tasks_status(self) -> None:
-        with TaskDAL() as db:
-            db.reset_tasks_status()
+        self.task_dal.reset_tasks_status()
 
     def get_tasks(self, count: int = 10) -> None:
-        with TaskDAL() as db:
-            self.tasks.extend(db.get_tasks(count))
+        self.tasks.extend(
+            self.task_dal.get_tasks(count)
+        )
 
     def pass_tasks(self) -> None:
         for task in self.tasks:
@@ -41,9 +43,12 @@ class Orchestrator:
         self.tasks = []
 
     def get_results(self) -> None:
-        redis_result = self.cache_0.red.rpop("results_queue")
-        while redis_result:
-            data = json.loads(redis_result)
+        orchestrator_logger.info("Getting results from Redis")
+        while True:
+            item = self.cache_0.red.rpop("results_queue")
+            if not item:
+                return
+            data = json.loads(item)
             result = Result(
                 task_id=data.pop("task_id"),
                 car=Car(
@@ -51,16 +56,13 @@ class Orchestrator:
                 )
             )
             self.results.append(result)
-            redis_result = self.cache_0.red.rpop("results_queue")
 
     def save_results(self) -> None:
         if self.results:
-            with ResultDAL() as db:
-                db.save_results(self.results)
+            self.result_dal.save_results(self.results)
             self.results = []
 
     def run(self) -> None:
-        self.create_tasks()
         self.reset_tasks_status()
 
         while True:
@@ -68,9 +70,9 @@ class Orchestrator:
             self.pass_tasks()
             self.get_results()
             self.save_results()
-            time.sleep(15)
+            time.sleep(20)
 
 
 if __name__ == "__main__":
-    orchestrator = Orchestrator()
+    orchestrator = Orchestrator("postgresql")
     orchestrator.run()

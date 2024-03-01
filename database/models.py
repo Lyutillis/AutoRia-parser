@@ -9,7 +9,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from database.db_layer import Base
+from database.config import Base
 
 
 class Car(Base):

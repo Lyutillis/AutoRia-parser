@@ -26,6 +26,11 @@ class Task:
 
 
 @dataclass
+class CreateTask:
+    page_number: int
+
+
+@dataclass
 class Result:
     task_id: int
     car: Car
