@@ -2,7 +2,6 @@ import asyncio
 from typing import List
 import json
 from dataclasses import asdict
-from dacite import from_dict
 from playwright.async_api import (
     async_playwright,
     Playwright,
@@ -11,12 +10,8 @@ from playwright.async_api import (
     Page
 )
 from urllib.parse import urljoin
-from datetime import datetime
 
-import redis
-
-from database.dal import DAL
-from utils.dto import Car, Task, Result
+from utils.dto import Task, Result
 from utils.cache import AsyncCache
 from utils.log import get_logger
 from utils.exceptions import (
@@ -35,6 +30,7 @@ worker_logger = get_logger("Worker")
 
 class Worker:
     def __init__(self) -> None:
+        self.tasks: List[Task] = []
         self.results: List[Result] = []
         self.cache_0: AsyncCache = AsyncCache(0)
 
@@ -45,14 +41,15 @@ class Worker:
         self.browser: Browser = None
         self.context: BrowserContext = None
 
-    async def get_task(self) -> None:
-        while True:
-            task = await self.cache_0.red.rpop("tasks_queue")
-            if task:
-                return Task(
-                    **json.loads(task)
+    async def get_tasks(self) -> None:
+        redis_result = await self.cache_0.red.rpop("tasks_queue")
+        while redis_result:
+            self.tasks.append(
+                Task(
+                    **json.loads(redis_result)
                 )
-            await asyncio.sleep(5)
+            )
+            redis_result = await self.cache_0.red.rpop("tasks_queue")
 
     async def save_results(self) -> None:
         for result in self.results[:]:
@@ -79,16 +76,13 @@ class Worker:
     def clean_asyncio_tasks(self) -> None:
         for task in self.asyncio_tasks:
             if task.done():
+                try:
+                    task.result()
+                except EmptyPageException:
+                    return True
                 self.asyncio_tasks.remove(task)
 
-    async def accept_cookies(self) -> None:
-        page = await self.context.new_page()
-        await page.goto(BASE_URL)
-        await page.get_by_text("Розумію і дозволяю").click()
-        await page.close()
-
     async def process_page(self, page: Page, task: Task) -> None:
-        print(asdict(task))
         page_number = task.page_number
         await page.goto(urljoin(BASE_URL, f"?page={page_number}"))
 
@@ -133,35 +127,31 @@ class Worker:
         worker_logger.info(f"Finished parsing page {page_number}")
 
     async def run_asyncio_task(self, task: Task) -> None:
-        print(1)
         page = await self.context.new_page()
-        print(2)
         try:
-            print(3)
             await self.process_page(page, task)
         finally:
             await page.close()
 
     async def run(self) -> None:
         await self.start_playwright()
-        await self.accept_cookies()
         try:
             while True:
-                print(4)
+                await self.get_tasks()
+
                 self.clean_asyncio_tasks()
 
                 if len(self.asyncio_tasks) < self.max_tasks:
-                    task = await self.get_task()
-                    self.asyncio_tasks.append(
-                        asyncio.create_task(
-                            self.run_asyncio_task(task)
+                    if self.tasks:
+                        task = self.tasks.pop(0)
+                        self.asyncio_tasks.append(
+                            asyncio.create_task(
+                                self.run_asyncio_task(task)
+                            )
                         )
-                    )
 
                 await self.save_results()
         finally:
-            await asyncio.gather(*self.asyncio_tasks)
-
             await self.stop_playwright()
 
 

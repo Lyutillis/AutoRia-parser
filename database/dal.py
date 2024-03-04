@@ -1,14 +1,6 @@
-import os
-import sys
-from sqlalchemy import and_
-from sqlalchemy.orm import Session
 from typing import List, Literal
-from dataclasses import asdict
-from datetime import datetime
 
-import envs
-from database import models
-from utils.dto import Car, Task, CreateTask, Result
+from utils import dto
 from utils.log import get_logger
 from database.db_layer import DBInterface
 
@@ -22,7 +14,7 @@ class DAL:
 
 
 class CarDAL(DAL):
-    def process_items(self, items: List[Car]):
+    def process_items(self, items: List[dto.Car]):
         if not items:
             pass
 
@@ -43,16 +35,16 @@ class TaskDAL(DAL):
     def create_tasks(self) -> None:
         db_logger.info("Creating new tasks")
         tasks = [
-            CreateTask(page_number=i)
+            dto.CreateTask(page_number=i)
             for i in range(1, 11)
         ]
         self.db.bulk_save_tasks(tasks)
 
-    def get_tasks(self, limit: int) -> List[Task]:
+    def get_tasks(self, limit: int) -> List[dto.Task]:
         db_logger.info("Getting tasks from DataBase")
         result = []
         for item in self.db.get_idle_tasks(limit):
-            task = Task(
+            task = dto.Task(
                 item.id,
                 item.page_number,
                 item.in_work,
@@ -65,7 +57,7 @@ class TaskDAL(DAL):
 
 
 class ResultDAL(DAL):
-    def save_results(self, items: List[Result]) -> None:
+    def save_results(self, items: List[dto.Result]) -> None:
         if not items:
             return
 
@@ -89,7 +81,7 @@ class ResultDAL(DAL):
 
             existing_vins.append(item.car.car_vin)
 
-            result = Result(
+            result = dto.CreateResult(
                 task_id=item.task_id,
                 car_id=db_car.id
             )

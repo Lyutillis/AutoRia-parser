@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from mongoengine import connect
 
 from database import models, mongo_models
-from utils.dto import Car, Task, CreateTask, Result
+from utils import dto
 import envs
 
 
@@ -34,21 +34,21 @@ class DatabaseABC(abc.ABC):
     @abc.abstractmethod
     def bulk_save_cars(
         self,
-        objects: List[Car]
+        objects: List[dto.Car]
     ) -> None:
         pass
 
     @abc.abstractmethod
     def bulk_save_tasks(
         self,
-        objects: List[CreateTask]
+        objects: List[dto.CreateTask]
     ) -> None:
         pass
 
     @abc.abstractmethod
     def bulk_save_results(
         self,
-        objects: List[Result]
+        objects: List[dto.CreateResult]
     ) -> None:
         pass
 
@@ -61,27 +61,27 @@ class DatabaseABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def update_task(self, task: Task, **kwargs) -> models.Task:
+    def update_task(self, task: dto.Task, **kwargs) -> models.Task:
         pass
 
     @abc.abstractmethod
     def add_car(
         self,
-        object: Car
+        object: dto.Car
     ) -> models.Car:
         pass
 
     @abc.abstractmethod
     def add_task(
         self,
-        object: CreateTask
+        object: dto.CreateTask
     ) -> models.Task:
         pass
 
     @abc.abstractmethod
     def add_result(
         self,
-        object: Result
+        object: dto.CreateResult
     ) -> models.Result:
         pass
 
@@ -114,7 +114,7 @@ class PostgreSQL(DatabaseABC):
 
     def bulk_save_cars(
         self,
-        objects: List[Car]
+        objects: List[dto.Car]
     ) -> None:
         with self.SessionLocal() as db:
             db.bulk_save_objects(
@@ -127,7 +127,7 @@ class PostgreSQL(DatabaseABC):
 
     def bulk_save_tasks(
         self,
-        objects: List[CreateTask]
+        objects: List[dto.CreateTask]
     ) -> None:
         with self.SessionLocal() as db:
             db.bulk_save_objects(
@@ -140,7 +140,7 @@ class PostgreSQL(DatabaseABC):
 
     def bulk_save_results(
         self,
-        objects: List[Result]
+        objects: List[dto.CreateResult]
     ) -> None:
         with self.SessionLocal() as db:
             db.bulk_save_objects(
@@ -161,10 +161,13 @@ class PostgreSQL(DatabaseABC):
     def get_idle_tasks(self, limit: int) -> List[models.Task]:
         with self.SessionLocal() as db:
             return db.query(models.Task).filter(
-                models.Task.in_work == False  # noqa
+                and_(
+                    models.Task.in_work == False,  # noqa
+                    models.Task.completed == False  # noqa
+                )
             ).limit(limit).all()
 
-    def update_task(self, task: Task, **kwargs) -> models.Task:
+    def update_task(self, task: dto.Task, **kwargs) -> models.Task:
         with self.SessionLocal() as db:
             db.query(models.Task).filter(
                 models.Task.id == task.id
@@ -174,35 +177,35 @@ class PostgreSQL(DatabaseABC):
 
     def add_car(
         self,
-        object: Car
+        object: dto.Car
     ) -> models.Car:
         with self.SessionLocal() as db:
             car = models.Car(**asdict(object))
             db.add(car)
             db.commit()
-            return db.query(models.Car).fitler(models.Car.id == car.id).first()
+            return db.query(models.Car).filter(models.Car.id == car.id).first()
 
     def add_task(
         self,
-        object: CreateTask
+        object: dto.CreateTask
     ) -> models.Task:
         with self.SessionLocal() as db:
             task = models.Task(**asdict(object))
             db.add(task)
             db.commit()
-            return db.query(models.Task).fitler(
+            return db.query(models.Task).filter(
                 models.Task.id == task.id
             ).first()
 
     def add_result(
         self,
-        object: Result
+        object: dto.CreateResult
     ) -> models.Result:
         with self.SessionLocal() as db:
             result = models.Result(**asdict(object))
             db.add(result)
             db.commit()
-            return db.query(models.Result).fitler(
+            return db.query(models.Result).filter(
                 models.Result.id == result.id
             ).first()
 
@@ -213,7 +216,7 @@ class PostgreSQL(DatabaseABC):
             ).first()
 
     @staticmethod
-    def create_database_dump(self) -> None:
+    def create_database_dump() -> None:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         file_path = os.path.join("dumps", f"dump_{timestamp}")
         command = (
@@ -233,11 +236,7 @@ class MongoDB(DatabaseABC):
 
     def __init__(self) -> None:
         connect(
-            db=envs.MONGO_DB,
-            username=envs.MONGO_USER,
-            password=envs.MONGO_PASSWORD,
-            host=envs.MONGO_HOST,
-            port=envs.MONGO_PORT
+            host=envs.MONGO_URI
         )
 
     def get_car_by_vin(self, vin: str) -> Optional[mongo_models.Car]:
@@ -245,7 +244,7 @@ class MongoDB(DatabaseABC):
 
     def bulk_save_cars(
         self,
-        objects: List[Car]
+        objects: List[dto.Car]
     ) -> None:
         mongo_models.Car.objects.insert(
             [
@@ -258,7 +257,7 @@ class MongoDB(DatabaseABC):
 
     def bulk_save_tasks(
         self,
-        objects: List[CreateTask]
+        objects: List[dto.CreateTask]
     ) -> None:
         mongo_models.Task.objects.insert(
             [
@@ -271,12 +270,13 @@ class MongoDB(DatabaseABC):
 
     def bulk_save_results(
         self,
-        objects: List[Result]
+        objects: List[dto.CreateResult]
     ) -> None:
         mongo_models.Result.objects.insert(
             [
                 mongo_models.Result(
-                    **asdict(result)
+                    task=mongo_models.Task.objects.get(id=result.task_id),
+                    car=mongo_models.Car.objects.get(id=result.car_id)
                 )
                 for result in objects
             ]
@@ -292,13 +292,13 @@ class MongoDB(DatabaseABC):
             in_work=False, completed=False
         ).limit(limit).all()
 
-    def update_task(self, task: Task, **kwargs) -> mongo_models.Task:
+    def update_task(self, task: dto.Task, **kwargs) -> mongo_models.Task:
         mongo_models.Task.objects(id=task.id).update_one(**kwargs)
         return mongo_models.Task.objects(id=task.id).first()
 
     def add_car(
         self,
-        object: Car
+        object: dto.Car
     ) -> mongo_models.Car:
         car = mongo_models.Car(**asdict(object))
         car.save()
@@ -306,7 +306,7 @@ class MongoDB(DatabaseABC):
 
     def add_task(
         self,
-        object: CreateTask
+        object: dto.CreateTask
     ) -> mongo_models.Task:
         task = mongo_models.Task(**asdict(object))
         task.save()
@@ -314,14 +314,32 @@ class MongoDB(DatabaseABC):
 
     def add_result(
         self,
-        object: Result
+        object: dto.CreateResult
     ) -> mongo_models.Result:
-        result = mongo_models.Result(**asdict(object))
+        car = mongo_models.Car.objects.get(id=object.car_id)
+        task = mongo_models.Task.objects.get(id=object.task_id)
+        result = mongo_models.Result()
+        result.task = task
+        result.car = car
         result.save()
         return result
 
     def get_task_by_id(self, id: int) -> mongo_models.Task:
         return mongo_models.Task.objects(id=id).first()
+
+    @staticmethod
+    def create_database_dump() -> None:
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        file_path = os.path.join("dumps", f"dump_{timestamp}")
+        command = (
+            f"mongodump --uri='{envs.MONGO_URI}' --out {file_path}"
+        )
+        code = os.system(command)
+        if code:
+            # db_logger.error(
+            #     f"Error dumping database: code - {code}, command - {command}"
+            # )
+            sys.exit(10)
 
 
 class DBInterface(DatabaseABC):
@@ -335,19 +353,19 @@ class DBInterface(DatabaseABC):
 
     def bulk_save_cars(
         self,
-        objects: List[Car]
+        objects: List[dto.Car]
     ) -> None:
         return self.db.bulk_save_cars(objects)
 
     def bulk_save_tasks(
         self,
-        objects: List[CreateTask]
+        objects: List[dto.CreateTask]
     ) -> None:
         return self.db.bulk_save_tasks(objects)
 
     def bulk_save_results(
         self,
-        objects: List[Result]
+        objects: List[dto.Result]
     ) -> None:
         return self.db.bulk_save_results(objects)
 
@@ -362,21 +380,24 @@ class DBInterface(DatabaseABC):
 
     def add_car(
         self,
-        object: Car
+        object: dto.Car
     ) -> mongo_models.Car:
         return self.db.add_car(object)
 
     def add_task(
         self,
-        object: CreateTask
+        object: dto.CreateTask
     ) -> mongo_models.Task:
         return self.db.add_task(object)
 
     def add_result(
         self,
-        object: Result
+        object: dto.CreateResult
     ) -> mongo_models.Result:
         return self.db.add_result(object)
 
     def get_task_by_id(self, id: int) -> models.Task:
         return self.db.get_task_by_id(id)
+
+    def create_database_dump(self) -> None:
+        self.db.create_database_dump()

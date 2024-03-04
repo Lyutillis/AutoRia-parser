@@ -1,14 +1,14 @@
 from typing import List, Literal
 import json
 from dataclasses import asdict
-from dacite import from_dict
 import time
 from datetime import datetime
 
-from database.dal import CarDAL, TaskDAL, ResultDAL
+from database.dal import TaskDAL, ResultDAL
 from utils.dto import Car, Task, Result
 from utils.cache import Cache
 from utils.log import get_logger
+from utils.encoders import ObjectIdEncoder
 
 
 orchestrator_logger = get_logger("Orchestrator")
@@ -38,7 +38,7 @@ class Orchestrator:
         for task in self.tasks:
             self.cache_0.red.lpush(
                 "tasks_queue",
-                json.dumps(asdict(task))
+                json.dumps(asdict(task), cls=ObjectIdEncoder)
             )
         self.tasks = []
 
@@ -55,6 +55,9 @@ class Orchestrator:
                     **data["car"]
                 )
             )
+            result.car.datetime_found = datetime.fromtimestamp(
+                result.car.datetime_found
+            )
             self.results.append(result)
 
     def save_results(self) -> None:
@@ -63,6 +66,7 @@ class Orchestrator:
             self.results = []
 
     def run(self) -> None:
+        self.create_tasks()
         self.reset_tasks_status()
 
         while True:
@@ -70,9 +74,10 @@ class Orchestrator:
             self.pass_tasks()
             self.get_results()
             self.save_results()
-            time.sleep(20)
+            time.sleep(5)
 
 
 if __name__ == "__main__":
-    orchestrator = Orchestrator("postgresql")
+    # DBInterface("mongodb").create_database_dump()
+    orchestrator = Orchestrator("mongodb")
     orchestrator.run()

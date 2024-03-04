@@ -34,3 +34,9 @@ class CreateTask:
 class Result:
     task_id: int
     car: Car
+
+
+@dataclass
+class CreateResult:
+    task_id: int
+    car_id: int
