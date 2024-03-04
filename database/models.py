@@ -7,7 +7,6 @@ from sqlalchemy import (
     DateTime,
     Boolean
 )
-from sqlalchemy.orm import relationship
 
 from database.config import Base
 

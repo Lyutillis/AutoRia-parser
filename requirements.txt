@@ -12,5 +12,12 @@ loguru
 playwright
 redis
 sqlalchemy
-alembic
-dacite
+bson
+threading
+multiprocessing
+urllib
+time
+os
+sys
+abc
+mongoengine
