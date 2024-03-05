@@ -1,4 +1,4 @@
-psycopg2
+psycopg2-binary
 datetime
 typing
 dataclasses
@@ -9,15 +9,7 @@ aiohttp
 requests
 parsel
 loguru
-playwright
 redis
 sqlalchemy
-bson
-threading
-multiprocessing
-urllib
-time
-os
-sys
-abc
 mongoengine
+playwright

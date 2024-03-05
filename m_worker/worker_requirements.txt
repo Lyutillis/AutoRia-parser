@@ -1,0 +1,9 @@
+asyncio
+typing
+dataclasses
+redis
+environs
+loguru
+requests
+parsel
+bson

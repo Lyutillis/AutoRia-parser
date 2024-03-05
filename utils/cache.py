@@ -15,7 +15,6 @@ class Cache:
             host=host,
             port=port,
             db=number_db,
-            password=password,
             decode_responses=True
         )
 
@@ -32,6 +31,5 @@ class AsyncCache:
             host=host,
             port=port,
             db=number_db,
-            password=password,
             decode_responses=True
         )

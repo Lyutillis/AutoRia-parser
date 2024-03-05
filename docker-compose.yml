@@ -8,14 +8,31 @@ services:
     env_file:
       - .env
 
-  spiders:
+  orchestrator:
     build: 
-      context: .
-    command: >
-      sh -c "python3 parser.py"
+      context: ./m_orchestrator
     volumes:
       - .:/app
     env_file:
       - .env
     depends_on:
         - db
+        - redis
+
+  worker:
+    build: 
+      context: ./m_worker
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+        - orchestrator
+        - redis
+
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+    env_file:
+      - .env

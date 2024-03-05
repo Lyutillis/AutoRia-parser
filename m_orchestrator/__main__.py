@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 from database.dal import TaskDAL, ResultDAL
+from database.db_layer import DBInterface
 from utils.dto import Car, Task, Result
 from utils.cache import Cache
 from utils.log import get_logger
@@ -78,6 +79,6 @@ class Orchestrator:
 
 
 if __name__ == "__main__":
-    # DBInterface("mongodb").create_database_dump()
+    DBInterface("postgresql").create_database_dump()
     orchestrator = Orchestrator("mongodb")
     orchestrator.run()
