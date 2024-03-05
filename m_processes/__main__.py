@@ -1,6 +1,6 @@
-from m_processes.run_processes import ProcessRunner
+from m_processes.run_processes import AutoriaScraper
 
 
 if __name__ == "__main__":
-    scraper = ProcessRunner()
+    scraper = AutoriaScraper("postgresql")
     scraper.run()

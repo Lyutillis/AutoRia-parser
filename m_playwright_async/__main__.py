@@ -1,8 +1,6 @@
 import asyncio
-import requests
 from urllib.parse import urljoin
-from typing import List
-from requests.exceptions import ChunkedEncodingError
+from typing import List, Literal
 from playwright.async_api import (
     async_playwright,
     Playwright,
@@ -19,8 +17,9 @@ from utils.exceptions import (
     NoUsernameException
 )
 from utils.log import get_logger
+from utils.dto import Car
 import envs
-from database.dal import Car, DAL
+from database.dal import CarDAL
 
 
 BASE_URL = "https://auto.ria.com/uk/car/used/"
@@ -29,7 +28,7 @@ scraper_logger = get_logger("AutoriaScraper")
 
 class AutoriaScraper:
 
-    def __init__(self) -> None:
+    def __init__(self, db_type: Literal['postgresql', 'mongodb']) -> None:
         self.results: List[Car] = []
         self.pages: int = envs.PAGES
 
@@ -39,6 +38,7 @@ class AutoriaScraper:
 
         self.db_is_busy: bool = False
         self.global_stop: bool = False
+        self.db: CarDAL = CarDAL(db_type)
 
         self.playwright: Playwright = None
         self.browser: Browser = None
@@ -58,12 +58,11 @@ class AutoriaScraper:
 
             self.db_is_busy = True
 
-            with DAL() as db:
-                results: list = []
-                for item in self.results[:]:
-                    self.results.remove(item)
-                    results.append(item)
-                await asyncio.to_thread(db.process_items, results)
+            results: list = []
+            for item in self.results[:]:
+                self.results.remove(item)
+                results.append(item)
+            await asyncio.to_thread(self.db.process_items, results)
 
         scraper_logger.info("Database was shut down")
 
@@ -89,12 +88,6 @@ class AutoriaScraper:
                 except EmptyPageException:
                     return True
                 self.tasks.remove(task)
-
-    async def accept_cookies(self) -> None:
-        page = await self.context.new_page()
-        await page.goto(BASE_URL)
-        await page.get_by_text("Розумію і дозволяю").click()
-        await page.close()
 
     async def run_task(self, page_number: int) -> None:
         page = await self.context.new_page()
@@ -128,8 +121,7 @@ class AutoriaScraper:
                 print("Skipped page with new design:", url)
                 print(
                     await page.query_selector(
-                        "(//div[@class='sellerInfoHiddenPhone']"
-                        "//button[@class='s1 conversion'])[1]"
+                        "//div[@id='sellerInfoHiddenPhone']"
                     )
                 )
                 continue
@@ -149,7 +141,6 @@ class AutoriaScraper:
         self.start_db()
 
         await self.start_playwright()
-        await self.accept_cookies()
 
         try:
             while current_page <= self.pages:
@@ -176,22 +167,9 @@ class AutoriaScraper:
 
             scraper_logger.info("Finished parsing")
 
-    @classmethod
-    async def get_page(self, url: str) -> str:
-        while True:
-            try:
-                response = requests.get(url, stream=False).text
-            except ChunkedEncodingError:
-                continue
-
-            if AutoriaParser.validate(response):
-                return response
-
-            await asyncio.sleep(1)
-
 
 async def main() -> None:
-    scraper = AutoriaScraper()
+    scraper = AutoriaScraper("postgresql")
     await scraper.run()
 
 

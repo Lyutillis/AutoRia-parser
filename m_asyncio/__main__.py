@@ -1,11 +1,14 @@
 from urllib.parse import urljoin
-from typing import List
+from typing import List, Literal
 import asyncio
 import aiohttp
+from parsel import Selector
 
-from database.db_layer import PostgresDB, Car
-from parsers.parser import AutoriaParser
+from database.dal import CarDAL
+from parsers.parser import AutoriaParser, AutoriaParserV1
+from utils.dto import Car
 from utils.exceptions import (
+    EmptyPageException,
     NoVinException,
     SoldException,
     NoUsernameException
@@ -20,16 +23,20 @@ scraper_logger = get_logger("AutoriaScraper")
 
 class AutoriaScraper:
 
-    def __init__(self) -> None:
+    def __init__(self, db_type: Literal["postgresql", "mongodb"]) -> None:
         self.results: List[Car] = []
+
         self.tasks: List[asyncio.Task] = []
         self.max_tasks = 100
+
+        self.db: CarDAL = CarDAL(db_type)
         self.db_is_busy = False
-        self.pages = envs.PAGES
         self.global_stop = False
-        self.tasks.append(
-            asyncio.create_task(self.bulk_save())
-        )
+
+        self.pages = envs.PAGES
+
+    def start_db(self) -> None:
+        self.db_task = asyncio.create_task(self.bulk_save())
 
     async def bulk_save(self) -> None:
         while not self.global_stop or self.db_is_busy:
@@ -42,70 +49,82 @@ class AutoriaScraper:
 
             self.db_is_busy = True
 
-            with PostgresDB() as db:
-                results = []
-                for item in self.results[:]:
-                    self.results.remove(item)
-                    results.append(item)
-                await asyncio.to_thread(db.process_items, results)
+            results = []
+            for item in self.results[:]:
+                self.results.remove(item)
+                results.append(item)
+            await asyncio.to_thread(self.db.process_items, results)
 
     def clean_tasks(self) -> None:
         for task in self.tasks:
             if task.done():
+                try:
+                    task.result()
+                except EmptyPageException:
+                    return True
                 self.tasks.remove(task)
 
     async def get_list_car_data(
         self,
-        url: int,
+        page_number: int,
     ) -> None:
-        detailed_page = await self.get_page(url)
-        try:
-            parser = AutoriaParser(detailed_page, url)
-            self.results.append(
-                parser.parse_detail_page()
-            )
-        except (SoldException, NoVinException, NoUsernameException):
-            pass
+        page = await self.get_page(
+            urljoin(BASE_URL, f"?page={page_number}")
+        )
 
-    async def run(self) -> None:
-        current_page = 1
-        scraper_logger.info("Launched parser")
+        scraper_logger.info(f"Parsing page {page_number}")
 
-        while current_page <= self.pages:
-            self.clean_tasks()
+        urls = AutoriaParser.get_urls(page)
 
-            if len(self.tasks) < self.max_tasks:
-                page = await self.get_page(
-                    urljoin(BASE_URL, f"?page={current_page}")
+        for url in urls:
+            detailed_page = await self.get_page(url)
+            page = Selector(text=detailed_page)
+
+            if not page.xpath("//*[contains(@class, 'phone_show_link')]"):
+                scraper_logger.info("Skipped page with new design.")
+                continue
+            else:
+                parser = AutoriaParserV1(detailed_page, url)
+
+            try:
+                self.results.append(
+                    parser.parse_detail_page()
                 )
-                if not AutoriaParser.check_list_page(page):
-                    scraper_logger.warning("Reached last page. Terminating...")
-                    break
-
-                scraper_logger.info(f"Parsing page {current_page}")
-
-                urls = AutoriaParser.get_urls(page)
-
-                for url in urls:
-
-                    task = asyncio.create_task(
-                        self.get_list_car_data(url)
-                    )
-                    self.tasks.append(task)
-
-                current_page += 1
+            except (SoldException, NoVinException, NoUsernameException):
                 continue
 
-            await asyncio.sleep(0.01)
+        scraper_logger.info(f"Finished parsing page {page_number}")
 
-        await asyncio.gather(*self.tasks)
+    async def run(self) -> None:
+        current_page: int = 1
 
-        self.global_stop = True
+        scraper_logger.info("Launched parser")
 
-        while self.db_is_busy:
-            await asyncio.sleep(0.1)
+        self.start_db()
 
-        scraper_logger.info("Finished parsing")
+        try:
+            while current_page <= self.pages:
+                if self.clean_tasks():
+                    break
+
+                if len(self.tasks) < self.max_tasks:
+                    task = asyncio.create_task(
+                        self.get_list_car_data(current_page)
+                    )
+                    self.tasks.append(task)
+                    current_page += 1
+                    continue
+
+                await asyncio.sleep(0.01)
+        finally:
+            await asyncio.gather(*self.tasks)
+
+            self.global_stop = True
+
+            while self.db_is_busy:
+                await asyncio.sleep(0.1)
+
+            scraper_logger.info("Finished parsing")
 
     @classmethod
     async def get_page(self, url: str) -> str:
@@ -121,7 +140,7 @@ class AutoriaScraper:
 
 
 async def main() -> None:
-    scraper = AutoriaScraper()
+    scraper = AutoriaScraper("postgresql")
     await scraper.run()
 
 

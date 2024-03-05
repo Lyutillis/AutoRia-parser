@@ -62,7 +62,7 @@ class Worker:
     async def start_playwright(self) -> None:
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(
-            headless=False,
+            headless=True,
         )
         self.context = await self.browser.new_context()
         worker_logger.info("Started Playwright")

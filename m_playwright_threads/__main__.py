@@ -1,9 +1,7 @@
-import requests
 from urllib.parse import urljoin
-from typing import List
+from typing import List, Literal
 import threading
 import time
-from requests.exceptions import ChunkedEncodingError
 from playwright.sync_api import (
     sync_playwright,
     Playwright,
@@ -13,7 +11,8 @@ from playwright.sync_api import (
 )
 from parsel import Selector
 
-from database.db_layer import PostgresDB, Car
+from database.dal import CarDAL
+from utils.dto import Car
 from parsers.parser import AutoriaParser, AutoriaParserV1, AutoriaParserV2
 from utils.exceptions import (
     EmptyPageException,
@@ -31,7 +30,7 @@ scraper_logger = get_logger("AutoriaScraper")
 
 class AutoriaScraper:
 
-    def __init__(self) -> None:
+    def __init__(self, db_type: Literal['postgresql', 'mongodb']) -> None:
         self.results: List[Car] = []
         self.pages: int = envs.PAGES
 
@@ -40,6 +39,7 @@ class AutoriaScraper:
 
         self.db_is_busy: bool = False
         self.db_thread: threading.Thread = None
+        self.db: CarDAL = CarDAL(db_type)
 
     def start_db_thread(self) -> None:
         self.db_thread = threading.Thread(
@@ -58,20 +58,16 @@ class AutoriaScraper:
 
             self.db_is_busy = True
 
-            with PostgresDB() as db:
-                results: list = []
-                for item in self.results[:]:
-                    self.results.remove(item)
-                    results.append(item)
-                db.process_items(results)
+            results: list = []
+            for item in self.results[:]:
+                self.results.remove(item)
+                results.append(item)
+            self.db.process_items(results)
 
     def clean_threads(self) -> None:
         for thread in self.threads:
             if not thread.is_alive():
                 self.threads.remove(thread)
-
-    def accept_cookies(self, page: Page) -> None:
-        page.get_by_text("Розумію і дозволяю").click()
 
     def run_thread(self, page_number: int) -> None:
         playwright: Playwright = sync_playwright().start()
@@ -95,8 +91,6 @@ class AutoriaScraper:
         if not AutoriaParser.check_list_page(content):
             scraper_logger.warning("Reached last page. Terminating...")
             raise EmptyPageException("Reached last page.")
-
-        self.accept_cookies(page)
 
         urls = AutoriaParser.get_urls(content)
 
@@ -124,14 +118,7 @@ class AutoriaScraper:
                     "//div[@class='sellerInfoHiddenPhone']"
                     "//button[@class='s1 conversion']"
                 ))
-                # page.locator(
-                #     "(//div[@class='sellerInfoHiddenPhone']"
-                #     "//button[@class='s1 conversion')])[1]"
-                # ).click()
-                # time.sleep(0.3)
-                # content = page.content()
-                # parser = AutoriaParserV2(content, url)
-
+                continue
             try:
                 self.results.append(parser.parse_detail_page())
             except (NoVinException, NoUsernameException, SoldException):
@@ -143,7 +130,9 @@ class AutoriaScraper:
         current_page: int = 1
 
         scraper_logger.info("Launched parser")
+
         self.start_db_thread()
+
         try:
             while current_page <= self.pages:
                 self.clean_threads()
@@ -162,29 +151,16 @@ class AutoriaScraper:
 
         except EmptyPageException:
             pass
+        finally:
+            for thread in self.threads:
+                thread.join()
 
-        for thread in self.threads:
-            thread.join()
+            while self.db_is_busy:
+                time.sleep(0.1)
 
-        while self.db_is_busy:
-            time.sleep(0.1)
-
-        scraper_logger.info("Finished parsing")
-
-    @classmethod
-    def get_page(self, url: str) -> str:
-        while True:
-            try:
-                response = requests.get(url, stream=False).text
-            except ChunkedEncodingError:
-                continue
-
-            if AutoriaParser.validate(response):
-                return response
-
-            time.sleep(1)
+            scraper_logger.info("Finished parsing")
 
 
 if __name__ == "__main__":
-    scraper = AutoriaScraper()
+    scraper = AutoriaScraper("postgresql")
     scraper.run()

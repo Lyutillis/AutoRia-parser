@@ -8,9 +8,13 @@ from sqlalchemy import create_engine, and_
 from sqlalchemy.orm import sessionmaker
 from mongoengine import connect
 
+from utils.log import get_logger
 from database import models, mongo_models
 from utils import dto
 import envs
+
+
+db_logger = get_logger("DB")
 
 
 def get_db_class(
@@ -226,9 +230,9 @@ class PostgreSQL(DatabaseABC):
         )
         code = os.system(command)
         if code:
-            # db_logger.error(
-            #     f"Error dumping database: code - {code}, command - {command}"
-            # )
+            db_logger.error(
+                f"Error dumping database: code - {code}, command - {command}"
+            )
             sys.exit(10)
 
 
@@ -332,13 +336,13 @@ class MongoDB(DatabaseABC):
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         file_path = os.path.join("dumps", f"dump_{timestamp}")
         command = (
-            f"mongodump --uri='{envs.MONGO_URI}' --out {file_path}"
+            f"mongodump --uri={envs.MONGO_URI} --out {file_path}"
         )
         code = os.system(command)
         if code:
-            # db_logger.error(
-            #     f"Error dumping database: code - {code}, command - {command}"
-            # )
+            db_logger.error(
+                f"Error dumping database: code - {code}, command - {command}"
+            )
             sys.exit(10)
 
 

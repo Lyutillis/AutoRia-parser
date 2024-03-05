@@ -1,13 +1,14 @@
+from parsel import Selector
 import requests
 from urllib.parse import urljoin
-from typing import List
+from typing import List, Literal
 import threading
 import multiprocessing
 import time
 from requests.exceptions import ChunkedEncodingError
 
-from database.db_layer import PostgresDB
-from parsers.parser import AutoriaParser
+from database.dal import CarDAL
+from parsers.parser import AutoriaParser, AutoriaParserV1
 from utils.exceptions import (
     EmptyPageException,
     NoVinException,
@@ -21,11 +22,9 @@ import envs
 BASE_URL = "https://auto.ria.com/uk/car/used/"
 
 scraper_logger = get_logger("Scraper")
-runner_logger = get_logger("Runner")
 
 
-class AutoriaScraper:
-
+class Scraper:
     def __init__(self, queue: multiprocessing.Queue) -> None:
         self.queue = queue
 
@@ -40,17 +39,22 @@ class AutoriaScraper:
         scraper_logger.info(f"Parsing page {page_number}")
 
         urls = AutoriaParser.get_urls(page)
-        cars_number = len(urls)
         results = []
         for url in urls:
             detailed_page = self.get_page(url)
+            page = Selector(text=detailed_page)
+
+            if not page.xpath("//*[contains(@class, 'phone_show_link')]"):
+                scraper_logger.info("Skipped page with new design.")
+                continue
+            else:
+                parser = AutoriaParserV1(detailed_page, url)
+
             try:
-                parser = AutoriaParser(detailed_page, url)
                 results.append(
                     parser.parse_detail_page()
                 )
             except (SoldException, NoVinException, NoUsernameException):
-                cars_number -= 1
                 continue
 
         self.queue.put(
@@ -58,7 +62,7 @@ class AutoriaScraper:
         )
 
         scraper_logger.info(
-            f"Finished parsing page {page_number}. Cars number: {cars_number}."
+            f"Finished parsing page {page_number}"
         )
 
     @classmethod
@@ -75,14 +79,19 @@ class AutoriaScraper:
             time.sleep(1)
 
 
-class ProcessRunner:
+class AutoriaScraper:
 
-    def __init__(self) -> None:
+    def __init__(self, db_type: Literal['postgresql', 'mongodb']) -> None:
         self.processes: List[multiprocessing.Process] = []
-        self.queue = multiprocessing.Queue()
-        self.max_processes = 21
-        self.pages = envs.PAGES
-        self.db_thread = threading.Thread(
+        self.queue: multiprocessing.Queue = multiprocessing.Queue()
+        self.max_processes: int = 21
+
+        self.db: CarDAL = CarDAL(db_type)
+
+        self.pages: int = envs.PAGES
+
+    def run_db_thread(self) -> None:
+        self.db_thread: threading.Thread = threading.Thread(
             target=self.bulk_save,
             daemon=True,
         )
@@ -91,8 +100,7 @@ class ProcessRunner:
     def bulk_save(self) -> None:
         while True:
             results = self.queue.get()
-            with PostgresDB() as db:
-                db.process_items(results)
+            self.db.process_items(results)
 
     def clean_processes(self) -> None:
         for process in self.processes:
@@ -100,16 +108,19 @@ class ProcessRunner:
                 self.processes.remove(process)
 
     def run(self) -> None:
-        current_page = 1
+        current_page: int = 1
 
-        runner_logger.info("Launched parser")
+        scraper_logger.info("Launched parser")
+
+        self.run_db_thread()
+
+        scraper = Scraper(self.queue)
 
         try:
             while current_page <= self.pages:
                 self.clean_processes()
 
                 if len(self.processes) < self.max_processes:
-                    scraper = AutoriaScraper(self.queue)
                     process = multiprocessing.Process(
                         target=scraper.get_list_page_data,
                         args=(current_page,)
@@ -123,8 +134,8 @@ class ProcessRunner:
 
         except EmptyPageException:
             pass
+        finally:
+            for process in self.processes:
+                process.join()
 
-        for process in self.processes:
-            process.join()
-
-        runner_logger.info("Finished parsing")
+            scraper_logger.info("Finished parsing")

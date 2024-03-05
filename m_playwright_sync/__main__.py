@@ -1,12 +1,10 @@
-import requests
 from urllib.parse import urljoin
-from typing import List
-import time
-from requests.exceptions import ChunkedEncodingError
+from typing import List, Literal
 from playwright.sync_api import sync_playwright
 
-from database.db_layer import PostgresDB, Car
+from database.dal import CarDAL
 from parsers.parser import AutoriaParser, AutoriaParserV1, AutoriaParserV2
+from utils.dto import Car
 from utils.exceptions import (
     NoVinException,
     SoldException,
@@ -22,17 +20,14 @@ scraper_logger = get_logger("AutoriaScraper")
 
 class AutoriaScraper:
 
-    def __init__(self) -> None:
+    def __init__(self, db_type: Literal['postgresql', 'mongodb']) -> None:
         self.results: List[Car] = []
         self.pages = envs.PAGES
+        self.db: CarDAL = CarDAL(db_type)
 
     def bulk_save(self) -> None:
-        with PostgresDB() as db:
-            db.process_items(self.results)
-            self.results = []
-
-    def accept_cookies(self, page):
-        page.get_by_text("Розумію і дозволяю").click()
+        self.db.process_items(self.results)
+        self.results = []
 
     def scrape_list_page(self, page, page_number: int) -> None:
         page.goto(urljoin(BASE_URL, f"?page={page_number}"))
@@ -51,15 +46,16 @@ class AutoriaScraper:
             if page.query_selector(
                 "//*[contains(@class, 'phone_show_link')]"
             ):
-                page.locator(
-                    "(//*[contains(@class, 'phone_show_link')])[1]"
-                ).click()
+                content = page.content()
                 parser = AutoriaParserV1(content, url)
             else:
-                page.locator(
-                    "(//*[contains(@class, 's1 elevated')])[1]"
-                ).click()
-                parser = AutoriaParserV2(content, url)
+                print("Skipped page with new design:", url)
+                print(
+                    page.query_selector(
+                        "//div[@id='sellerInfoHiddenPhone']"
+                    )
+                )
+                continue
 
             try:
                 self.results.append(parser.parse_detail_page())
@@ -81,9 +77,6 @@ class AutoriaScraper:
 
             scraper_logger.info("Launched parser")
 
-            page.goto(BASE_URL)
-            self.accept_cookies(page)
-
             while current_page <= self.pages:
                 if self.scrape_list_page(page, current_page):
                     break
@@ -92,20 +85,7 @@ class AutoriaScraper:
 
         scraper_logger.info("Finished parsing")
 
-    @classmethod
-    def get_page(self, url: str) -> str:
-        while True:
-            try:
-                response = requests.get(url, stream=False).text
-            except ChunkedEncodingError:
-                continue
-
-            if AutoriaParser.validate(response):
-                return response
-
-            time.sleep(1)
-
 
 if __name__ == "__main__":
-    scraper = AutoriaScraper()
+    scraper = AutoriaScraper("postgresql")
     scraper.run()
